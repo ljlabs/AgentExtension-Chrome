@@ -1,0 +1,27 @@
+{
+  "name": "agentextension-chrome",
+  "version": "1.0.0",
+  "description": "Chrome Manifest V3 extension that adds a neobrutalist pastel chat side panel. It connects to a local OpenAI-compatible LLM server, sends page HTML when enabled, validates tool calls, returns validation errors to the model, asks permission before sending images, and can interact with the bound tab.",
+  "main": "background.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ljlabs/AgentExtension-Chrome.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ljlabs/AgentExtension-Chrome/issues"
+  },
+  "homepage": "https://github.com/ljlabs/AgentExtension-Chrome#readme",
+  "devDependencies": {
+    "dotenv": "^17.4.2"
+  }
+}
