@@ -17,6 +17,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sidepanelHelpers } from "./test-helpers.mjs";
+
+const { extractImages, containsImages, stripImages } = sidepanelHelpers;
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -358,73 +361,8 @@ describe("tools-schema.js — AGENT_TOOL_MAP", () => {
 });
 
 describe("sidepanel.js — image handling functions", () => {
-  // Reimplement the pure functions from sidepanel.js for testing
-  function extractImages(result) {
-    const images = [];
-
-    if (result && result.data && Array.isArray(result.data._images)) {
-      images.push(...result.data._images);
-      delete result.data._images;
-    }
-
-    if (result && Array.isArray(result._images)) {
-      images.push(...result._images);
-      delete result._images;
-    }
-
-    return images;
-  }
-
-  function containsImages(messages) {
-    return messages.some((message) => {
-      if (Array.isArray(message.content)) {
-        return message.content.some((part) => part && part.type === "image_url");
-      }
-
-      if (typeof message.content === "string") {
-        return message.content.includes("data:image");
-      }
-
-      return false;
-    });
-  }
-
-  function stripImages(messages) {
-    return messages.map((message) => {
-      if (Array.isArray(message.content)) {
-        const textParts = message.content.filter(
-          (part) => part && part.type === "text"
-        );
-        const hadImage = message.content.some(
-          (part) => part && part.type === "image_url"
-        );
-
-        const text = textParts.map((part) => part.text || "").join("\n");
-
-        return {
-          ...message,
-          content: text
-            ? `${text}${hadImage ? "\n[image omitted]" : ""}`
-            : "[image omitted]"
-        };
-      }
-
-      if (
-        typeof message.content === "string" &&
-        message.content.includes("data:image")
-      ) {
-        return {
-          ...message,
-          content: message.content.replace(
-            /data:image\/[a-z0-9+.]+;base64,[A-Za-z0-9+/=]+/gi,
-            "[image omitted]"
-          )
-        };
-      }
-
-      return message;
-    });
-  }
+  // extractImages, containsImages, stripImages loaded from real sidepanel.js
+  // via sidepanelHelpers (vm-based loader in test-helpers.mjs)
 
   describe("extractImages", () => {
     it("extracts _images from result.data", () => {
@@ -437,7 +375,8 @@ describe("sidepanel.js — image handling functions", () => {
       };
 
       const images = extractImages(result);
-      assert.deepEqual(images, ["data:image/png;base64,abc123"]);
+      assert.equal(images.length, 1);
+      assert.equal(images[0], "data:image/png;base64,abc123");
       assert.equal(result.data._images, undefined, "_images should be deleted");
     });
 
@@ -448,18 +387,19 @@ describe("sidepanel.js — image handling functions", () => {
       };
 
       const images = extractImages(result);
-      assert.deepEqual(images, ["data:image/jpeg;base64,xyz789"]);
+      assert.equal(images.length, 1);
+      assert.equal(images[0], "data:image/jpeg;base64,xyz789");
     });
 
     it("returns empty array when no images", () => {
       const result = { ok: true, data: { format: "png" } };
       const images = extractImages(result);
-      assert.deepEqual(images, []);
+      assert.equal(images.length, 0);
     });
 
     it("handles null/undefined result gracefully", () => {
-      assert.deepEqual(extractImages(null), []);
-      assert.deepEqual(extractImages(undefined), []);
+      assert.equal(extractImages(null).length, 0);
+      assert.equal(extractImages(undefined).length, 0);
     });
   });
 

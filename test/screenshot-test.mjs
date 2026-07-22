@@ -5,67 +5,16 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import vm from "node:vm";
 
-import { buildChromeMock, sidepanelHelpers } from "./test-helpers.mjs";
+import { buildChromeMock, loadBackground, sidepanelHelpers } from "./test-helpers.mjs";
 
 const { extractImages, buildImageMessage, buildToolMessage } = sidepanelHelpers;
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..");
 
 const MIME_MAP = {
   png: "image/png",
   jpeg: "image/jpeg",
   webp: "image/webp"
 };
-
-/**
- * Evaluate background.js inside a vm sandbox with the given chrome mock.
- * Returns the sandbox (with real screenshotTool, etc.) and the chrome object
- * so callers can mutate it mid-test.
- */
-function loadBackground(overrides = {}) {
-  const chrome = buildChromeMock(overrides);
-
-  const sandbox = vm.createContext({
-    chrome,
-    importScripts: () => {},
-    console,
-    fetch,
-    setTimeout,
-    clearTimeout,
-    URL,
-    AbortController,
-    Blob: globalThis.Blob,
-    TextEncoder: globalThis.TextEncoder,
-    TextDecoder: globalThis.TextDecoder,
-    btoa: globalThis.btoa,
-    atob: globalThis.atob,
-    JSON,
-    Math,
-    Date,
-    Number,
-    String,
-    Array,
-    Object,
-    Error,
-    TypeError,
-    Promise,
-    RegExp,
-    parseInt: globalThis.parseInt,
-    isNaN: globalThis.isNaN,
-    isFinite: globalThis.isFinite
-  });
-
-  const code = readFileSync(resolve(ROOT, "background.js"), "utf-8");
-  vm.runInContext(code, sandbox);
-
-  return { sandbox, chrome };
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
@@ -197,7 +146,8 @@ describe("extractImages — screenshot result pipeline", () => {
 
     const images = extractImages(result);
 
-    assert.deepEqual(images, ["image/jpeg;base64,/9j/4AAQ"]);
+    assert.equal(images.length, 1);
+    assert.equal(images[0], "image/jpeg;base64,/9j/4AAQ");
     assert.equal(result.data._images, undefined, "_images should be deleted from result.data");
   });
 
@@ -223,15 +173,15 @@ describe("extractImages — screenshot result pipeline", () => {
   it("returns empty when no _images present", () => {
     const result = { ok: true, data: { format: "jpeg", text: "hello" } };
     const images = extractImages(result);
-    assert.deepEqual(images, []);
+    assert.equal(images.length, 0);
   });
 
   it("returns empty for null result", () => {
-    assert.deepEqual(extractImages(null), []);
+    assert.equal(extractImages(null).length, 0);
   });
 
   it("returns empty for undefined result", () => {
-    assert.deepEqual(extractImages(undefined), []);
+    assert.equal(extractImages(undefined).length, 0);
   });
 });
 

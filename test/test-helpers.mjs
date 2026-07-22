@@ -1,9 +1,17 @@
 /**
  * Test helpers for the AgentExtension Chrome extension.
  *
- * This module provides a way to test the background.js service worker functions
- * by mocking the chrome.* globals and importing the actual implementation.
+ * Provides vm-based loaders that evaluate the real background.js and sidepanel.js
+ * inside isolated sandboxes with mocked chrome.* globals, plus shared mock builders.
  */
+
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, "..");
 
 // Mock chrome APIs for testing
 global.chrome = {
@@ -74,8 +82,6 @@ global.console = console;
 
 /**
  * Build a chrome mock with customizable overrides for testing.
- * @param {Object} overrides - Override functions for chrome APIs
- * @returns {Object} Chrome mock object
  */
 export function buildChromeMock(overrides = {}) {
   const runtime = { lastError: null };
@@ -163,16 +169,185 @@ export function buildChromeMock(overrides = {}) {
 }
 
 /**
- * Reset the chrome mock to default state
- * @param {Object} overrides - Optional overrides
+ * Evaluate background.js in a vm sandbox with a mocked chrome global.
+ * Returns { sandbox, chrome } — call sandbox.screenshotTool, etc.
  */
+export function loadBackground(overrides = {}) {
+  const chrome = buildChromeMock(overrides);
+
+  const sandbox = vm.createContext({
+    chrome,
+    importScripts: () => {},
+    console,
+    fetch,
+    setTimeout,
+    clearTimeout,
+    URL,
+    AbortController,
+    Blob: globalThis.Blob,
+    TextEncoder: globalThis.TextEncoder,
+    TextDecoder: globalThis.TextDecoder,
+    btoa: globalThis.btoa,
+    atob: globalThis.atob,
+    JSON,
+    Math,
+    Date,
+    Number,
+    String,
+    Array,
+    Object,
+    Error,
+    TypeError,
+    Promise,
+    RegExp,
+    parseInt: globalThis.parseInt,
+    isNaN: globalThis.isNaN,
+    isFinite: globalThis.isFinite
+  });
+
+  const code = readFileSync(resolve(ROOT, "background.js"), "utf-8");
+  vm.runInContext(code, sandbox);
+
+  return { sandbox, chrome };
+}
+
+/**
+ * Evaluate sidepanel.js in a vm sandbox, stripping the IIFE wrapper,
+ * so pure functions like extractImages/containsImages/stripImages are
+ * accessible on the returned context.
+ */
+export function loadSidepanel() {
+  let code = readFileSync(resolve(ROOT, "sidepanel.js"), "utf-8");
+
+  // Strip the IIFE wrapper so declarations become sandbox-top-level
+  code = code.replace(/^\(\(\) => \{/, "").replace(/\}\)\(\);?\s*$/, "");
+
+  const sandbox = vm.createContext({
+    chrome: global.chrome,
+    document: {
+      getElementById: () => null,
+      createElement: (tag) => ({
+        textContent: "",
+        innerHTML: "",
+        appendChild: () => {},
+        className: "",
+        classList: { add: () => {}, remove: () => {}, contains: () => false },
+        style: {},
+        href: "",
+        target: "",
+        rel: "",
+        value: "",
+        checked: false,
+        selected: false,
+        click: () => {},
+        addEventListener: () => {},
+        dispatchEvent: () => {},
+        setAttribute: () => {},
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        dataset: {},
+      }),
+      createDocumentFragment: () => ({ appendChild: () => {} }),
+      addEventListener: () => {},
+      body: { appendChild: () => {} },
+    },
+    MutationObserver: class { observe() {} disconnect() {} },
+    console,
+    fetch,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    URL,
+    AbortController,
+    Blob: globalThis.Blob,
+    TextEncoder: globalThis.TextEncoder,
+    TextDecoder: globalThis.TextDecoder,
+    btoa: globalThis.btoa,
+    atob: globalThis.atob,
+    JSON,
+    Math,
+    Date,
+    Number,
+    String,
+    Array,
+    Object,
+    Error,
+    TypeError,
+    Promise,
+    RegExp,
+    parseInt: globalThis.parseInt,
+    isNaN: globalThis.isNaN,
+    isFinite: globalThis.isFinite,
+    Image: class { set src(v) {} },
+  });
+
+  vm.runInContext(code, sandbox);
+
+  return sandbox;
+}
+
+// --- sidepanel functions: loaded lazily from the real source ---
+
+let _sidepanelCtx = null;
+function getSidepanelCtx() {
+  if (!_sidepanelCtx) _sidepanelCtx = loadSidepanel();
+  return _sidepanelCtx;
+}
+
+/**
+ * Build image message for OpenAI format (test helper — not duplicated from source)
+ */
+function buildImageMessage(imagePayloads, toolCallId) {
+  if (imagePayloads.length) {
+    return {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Images for tool call ${toolCallId}:`
+        },
+        ...imagePayloads.map((url) => ({
+          type: "image_url",
+          image_url: { url }
+        }))
+      ]
+    };
+  }
+  return null;
+}
+
+/**
+ * Build tool message for OpenAI format (test helper — not duplicated from source)
+ */
+function buildToolMessage(toolCallId, result) {
+  return {
+    role: "tool",
+    tool_call_id: toolCallId,
+    content: JSON.stringify(result)
+  };
+}
+
+/**
+ * Access real sidepanel.js functions via lazy vm load.
+ * extractImages comes from sidepanel.js; buildImageMessage/buildToolMessage
+ * are test-only helpers (sidepanel.js builds these inline, not as functions).
+ */
+export const sidepanelHelpers = {
+  get extractImages() { return getSidepanelCtx().extractImages; },
+  get containsImages() { return getSidepanelCtx().containsImages; },
+  get stripImages() { return getSidepanelCtx().stripImages; },
+  buildImageMessage,
+  buildToolMessage,
+};
+
+// --- Mock utilities ---
+
 export function resetChromeMock(overrides = {}) {
   global.chrome = buildChromeMock(overrides);
 }
 
-/**
- * Mock fetch for testing fetch calls
- */
 export function mockFetch(responses = {}) {
   const originalFetch = global.fetch;
   global.fetch = async (url, options) => {
@@ -189,9 +364,6 @@ export function mockFetch(responses = {}) {
   return () => { global.fetch = originalFetch; };
 }
 
-/**
- * Mock chrome.storage for testing
- */
 export function mockChromeStorage(localData = {}, sessionData = {}) {
   const localStore = { ...localData };
   const sessionStore = { ...sessionData };
@@ -236,18 +408,6 @@ export function mockChromeStorage(localData = {}, sessionData = {}) {
   };
 }
 
-/**
- * Clamp integer helper (matches background.js)
- */
-export function clampInt(value, min, max, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
-
-/**
- * Mock chrome.debugger with custom behavior
- */
 export function mockChromeDebugger(options = {}) {
   const {
     attachError = null,
@@ -301,9 +461,6 @@ export function mockChromeDebugger(options = {}) {
   };
 }
 
-/**
- * Mock chrome.tabs for testing
- */
 export function mockChromeTabs(options = {}) {
   const {
     active = true,
@@ -328,9 +485,6 @@ export function mockChromeTabs(options = {}) {
   global.chrome.tabs.query = async () => [{ id: 1, active, windowId, url, title }];
 }
 
-/**
- * Create a mock tab for testing
- */
 export function createMockTab(overrides = {}) {
   return {
     id: 1,
@@ -342,72 +496,9 @@ export function createMockTab(overrides = {}) {
   };
 }
 
-/**
- * Mock functions from sidepanel.js that are used in testing
- */
-export const sidepanelHelpers = {
-  extractImages,
-  buildImageMessage,
-  buildToolMessage,
-};
-
-/**
- * Extract images from tool result (matches sidepanel.js extractImages)
- */
-function extractImages(result) {
-  const images = [];
-
-  if (result && result.data && Array.isArray(result.data._images)) {
-    images.push(...result.data._images);
-    delete result.data._images;
-  }
-
-  if (result && Array.isArray(result._images)) {
-    images.push(...result._images);
-    delete result._images;
-  }
-
-  return images;
-}
-
-/**
- * Build image message for OpenAI format (matches sidepanel.js buildImageMessage)
- */
-function buildImageMessage(imagePayloads, toolCallId) {
-  if (imagePayloads.length) {
-    return {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: `Images for tool call ${toolCallId}:`
-        },
-        ...imagePayloads.map((url) => ({
-          type: "image_url",
-          image_url: { url }
-        }))
-      ]
-    };
-  }
-  return null;
-}
-
-/**
- * Build tool message for OpenAI format (matches sidepanel.js buildToolMessage)
- */
-function buildToolMessage(toolCallId, result) {
-  return {
-    role: "tool",
-    tool_call_id: toolCallId,
-    content: JSON.stringify(result)
-  };
-}
-
-/**
- * Mock sidepanel functions for testing
- */
 export function mockSidepanelFunctions(overrides = {}) {
-  global.extractImages = overrides.extractImages || extractImages;
+  const ctx = getSidepanelCtx();
+  global.extractImages = overrides.extractImages || ctx.extractImages;
   global.buildImageMessage = overrides.buildImageMessage || buildImageMessage;
   global.buildToolMessage = overrides.buildToolMessage || buildToolMessage;
 }
