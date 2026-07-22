@@ -111,6 +111,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      if (message.type === "getRiskPatterns") {
+        const patterns = await getRiskPatterns();
+        sendResponse({ ok: true, data: patterns });
+        return;
+      }
+
+      if (message.type === "saveRiskPatterns") {
+        await saveRiskPatterns(message.patterns);
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (message.type === "exportRiskPatterns") {
+        const patterns = await getRiskPatterns();
+        sendResponse({ ok: true, data: JSON.stringify(patterns, null, 2) });
+        return;
+      }
+
+      if (message.type === "importRiskPatterns") {
+        const imported = typeof message.jsonString === "string" ? JSON.parse(message.jsonString) : message.patterns;
+        const current = await getRiskPatterns();
+        const merged = mergeRiskPatterns(current, imported);
+        await saveRiskPatterns(merged);
+        sendResponse({ ok: true, data: merged });
+        return;
+      }
+
       sendResponse({ ok: false, error: `Unknown message type: ${message.type}` });
     } catch (err) {
       sendResponse({ ok: false, error: err.message || String(err) });
@@ -149,6 +176,10 @@ async function handleExecuteTool(message) {
 
   if (tool === "write_browser_storage") {
     return await handleWriteBrowserStorage(args);
+  }
+
+  if (tool === "record_risk_assessment") {
+    return await handleRecordRiskAssessment(args);
   }
 
   if (tool === "memories") {
@@ -846,4 +877,66 @@ async function blobToDataUrl(blob) {
   }
 
   return `data:${blob.type};base64,${btoa(binary)}`;
+}
+
+const DEFAULT_RISK_PATTERNS = [
+  { patternType: "selector", pattern: "button[type='submit'], input[type='submit']", action: "click", riskLevel: "high", reason: "Form submission trigger" },
+  { patternType: "urlPattern", pattern: "*play.google.com/console*", action: "navigate", riskLevel: "high", reason: "Google Play Console deployment site" },
+  { patternType: "urlPattern", pattern: "*appstoreconnect.apple.com*", action: "navigate", riskLevel: "high", reason: "App Store Connect deployment site" },
+  { patternType: "urlPattern", pattern: "*vercel.com*", action: "navigate", riskLevel: "high", reason: "Vercel cloud deployment portal" },
+  { patternType: "textPattern", pattern: "\\b(delete|remove|destroy|erase|cancel subscription)\\b", action: "click", riskLevel: "high", reason: "Destructive action label" },
+  { patternType: "textPattern", pattern: "\\b(pay|buy|checkout|subscribe|place order)\\b", action: "click", riskLevel: "high", reason: "Financial transaction trigger" },
+  { patternType: "inputType", pattern: "file", action: "type_text", riskLevel: "medium", reason: "File upload input" }
+];
+
+async function getRiskPatterns() {
+  try {
+    const res = await chrome.storage.local.get("agent_risk_patterns");
+    if (res && res.agent_risk_patterns && Array.isArray(res.agent_risk_patterns.patterns)) {
+      return res.agent_risk_patterns.patterns;
+    }
+  } catch (err) {
+    console.error("Failed reading risk patterns", err);
+  }
+  return DEFAULT_RISK_PATTERNS;
+}
+
+async function saveRiskPatterns(patterns) {
+  const data = {
+    patterns: Array.isArray(patterns) ? patterns : DEFAULT_RISK_PATTERNS,
+    updatedAt: new Date().toISOString()
+  };
+  await chrome.storage.local.set({ agent_risk_patterns: data });
+  return data;
+}
+
+function mergeRiskPatterns(existing, incoming) {
+  const list = Array.isArray(existing) ? [...existing] : [];
+  const incomingList = Array.isArray(incoming) ? incoming : [];
+
+  for (const item of incomingList) {
+    if (!item || !item.pattern) continue;
+    const matchIdx = list.findIndex(p => p.patternType === item.patternType && p.pattern === item.pattern);
+    if (matchIdx >= 0) {
+      list[matchIdx] = { ...list[matchIdx], ...item };
+    } else {
+      list.push(item);
+    }
+  }
+  return list;
+}
+
+async function handleRecordRiskAssessment(args) {
+  const current = await getRiskPatterns();
+  const newEntry = {
+    patternType: args.patternType,
+    pattern: args.pattern,
+    action: args.action,
+    riskLevel: args.riskLevel || "high",
+    reason: args.reason || "Learned risk assessment",
+    createdAt: new Date().toISOString()
+  };
+  const updated = mergeRiskPatterns(current, [newEntry]);
+  await saveRiskPatterns(updated);
+  return { ok: true, data: { recorded: newEntry, totalPatterns: updated.length } };
 }

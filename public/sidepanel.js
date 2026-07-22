@@ -10,7 +10,14 @@ Rules:
 - Prefer get_interactive_snapshot, then use refs for click, type_text, set_value, press_key, and scroll_to.
 - If a tool call is invalid, you will receive validation errors. Fix the tool call and try again.
 - Do not invent refs, selectors, or page facts.
-- When finished, answer in plain text without tool calls unless another tool call is needed.`;
+- When finished, answer in plain text without tool calls unless another tool call is needed.
+
+Guardrails & Plan Mode:
+- Use 'submit_plan' before executing complex, multi-step tasks (e.g. deployments, form filings, bulk modifications) or when Plan Mode is enabled.
+- Use 'ask_user_question' to ask clarifying questions with recommended options when user requirements are ambiguous.
+- Use 'request_approval' before performing high-risk actions such as form submissions, purchases, deletions, deployments, file transfers, or sending messages.
+- Use 'record_risk_assessment' to save newly identified risk patterns so future sessions automatically recognize them.
+- Use 'assess_page_risk' to scan pages for high-risk targets before taking actions.`;
 
 const DEFAULT_SETTINGS = {
   baseUrl: "http://localhost:8000/v1",
@@ -60,7 +67,9 @@ const state = {
   sessionAllowedNetworkOrigins: new Set(),
   sessionDeniedNetworkOrigins: new Set(),
   visionFailed: false,
-  activePermission: null
+  activePermission: null,
+  planMode: false,
+  currentPlan: null
 };
 
 // --- Per-tab state persistence ---
@@ -170,6 +179,7 @@ async function init() {
 }
 
 function cacheDom() {
+  dom.planModeBtn = document.getElementById("planModeBtn");
   dom.tabInfo = document.getElementById("tabInfo");
   dom.editBtn = document.getElementById("editBtn");
   dom.rebindBtn = document.getElementById("rebindBtn");
@@ -200,6 +210,10 @@ function cacheDom() {
   dom.systemPromptInput = document.getElementById("systemPromptInput");
   dom.saveSettingsBtn = document.getElementById("saveSettingsBtn");
 
+  dom.exportRiskPatternsBtn = document.getElementById("exportRiskPatternsBtn");
+  dom.importRiskPatternsBtn = document.getElementById("importRiskPatternsBtn");
+  dom.importRiskFileInput = document.getElementById("importRiskFileInput");
+
   dom.modalBackdrop = document.getElementById("modalBackdrop");
   dom.modalTitle = document.getElementById("modalTitle");
   dom.modalBody = document.getElementById("modalBody");
@@ -209,6 +223,7 @@ function cacheDom() {
 }
 
 function attachListeners() {
+  dom.planModeBtn.addEventListener("click", togglePlanMode);
   dom.sendBtn.addEventListener("click", onSend);
   dom.stopBtn.addEventListener("click", onStop);
   dom.clearBtn.addEventListener("click", onClear);
@@ -219,6 +234,10 @@ function attachListeners() {
   });
   dom.refreshModelsBtn.addEventListener("click", loadModels);
   dom.saveSettingsBtn.addEventListener("click", saveSettings);
+
+  dom.exportRiskPatternsBtn.addEventListener("click", onExportRiskPatterns);
+  dom.importRiskPatternsBtn.addEventListener("click", () => dom.importRiskFileInput.click());
+  dom.importRiskFileInput.addEventListener("change", onImportRiskFile);
 
   dom.userInput.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -259,7 +278,7 @@ function attachListeners() {
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === "tabActivated") {
-      handleTabActivated(message.tabId).catch(() => {});
+      handleTabActivated(message.tabId, message.url || "").catch(() => {});
     }
   });
 }
@@ -393,10 +412,15 @@ async function onRebind() {
   }
 }
 
-async function handleTabActivated(newTabId) {
+async function handleTabActivated(newTabId, newTabUrl) {
   if (state.isRunning) return;
 
   if (newTabId === state.boundTabId) return;
+
+  // Ignore switches to extension-owned pages (e.g. the editor tab opened
+  // by clicking the Edit button). These aren't real browsing tabs and
+  // switching to them should not reset/replace the current chat session.
+  if (newTabUrl && newTabUrl.startsWith("chrome-extension://")) return;
 
   await saveTabState(state.boundTabId);
 
@@ -1091,6 +1115,28 @@ function convertParsedToolCall(obj, index) {
 
 async function executeToolWithPermissions(name, args) {
   try {
+    if (name === "ask_user_question") {
+      const response = await renderQuestionInChat(args);
+      return { ok: true, data: response };
+    }
+
+    if (name === "request_approval") {
+      const response = await renderApprovalInChat(args);
+      return { ok: true, data: response };
+    }
+
+    if (name === "submit_plan") {
+      const response = await renderPlanInChat(args);
+      return { ok: true, data: response };
+    }
+
+    if (name === "assess_page_risk") {
+      if (!state.boundTabId) {
+        return { ok: false, error: "No bound tab to scan for risks." };
+      }
+      return await executeContentScriptTool("assess_page_risk", args);
+    }
+
     if (name === "screenshot" || (name === "get_images" && args.includeBase64)) {
       const permission = await requestPermission(
         "image",
@@ -1474,9 +1520,264 @@ function ensureLeadingSlash(path) {
   return value.startsWith("/") ? value : `/${value}`;
 }
 
-function truncate(value, max = 500) {
-  const text = typeof value === "string" ? value : value == null ? "" : String(value);
-  if (!Number.isFinite(max) || max <= 0) return text;
-  return text.length > max ? `${text.slice(0, max)}...` : text;
+function togglePlanMode() {
+  state.planMode = !state.planMode;
+  if (dom.planModeBtn) {
+    dom.planModeBtn.textContent = state.planMode ? "Plan: ON" : "Plan: OFF";
+    dom.planModeBtn.classList.toggle("plan-active", state.planMode);
+  }
+  addSystem(`Plan Mode ${state.planMode ? "enabled" : "disabled"}.`);
+}
+
+async function renderQuestionInChat(args) {
+  return new Promise((resolve) => {
+    const body = createMessage("assistant", "Clarifying Question");
+
+    const card = document.createElement("div");
+    card.className = "question-card";
+
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = args.question || "Question";
+    card.appendChild(titleEl);
+
+    const optionsContainer = document.createElement("div");
+    optionsContainer.className = "question-options";
+
+    const options = Array.isArray(args.options) ? args.options : [];
+    const inputType = args.multiSelect ? "checkbox" : "radio";
+    const groupName = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+    options.forEach((optText, i) => {
+      const label = document.createElement("label");
+      label.className = "question-option-label";
+
+      const input = document.createElement("input");
+      input.type = inputType;
+      input.name = groupName;
+      input.value = optText;
+
+      const span = document.createElement("span");
+      span.textContent = optText;
+
+      label.appendChild(input);
+      label.appendChild(span);
+      optionsContainer.appendChild(label);
+    });
+
+    card.appendChild(optionsContainer);
+
+    let freeTextInput = null;
+    if (args.allowFreeText !== false) {
+      freeTextInput = document.createElement("input");
+      freeTextInput.type = "text";
+      freeTextInput.className = "question-free-text";
+      freeTextInput.placeholder = "Other / additional details...";
+      card.appendChild(freeTextInput);
+    }
+
+    const submitBtn = document.createElement("button");
+    submitBtn.className = "btn primary small";
+    submitBtn.textContent = "Submit Answer";
+    submitBtn.style.marginTop = "10px";
+    card.appendChild(submitBtn);
+
+    body.appendChild(card);
+    scrollToBottom();
+
+    submitBtn.addEventListener("click", () => {
+      const selected = Array.from(optionsContainer.querySelectorAll("input:checked")).map((el) => el.value);
+      const freeText = freeTextInput ? freeTextInput.value.trim() : "";
+
+      let answer = "";
+      if (selected.length > 0) {
+        answer = selected.join(", ");
+        if (freeText) answer += ` (${freeText})`;
+      } else {
+        answer = freeText || "No answer provided";
+      }
+
+      // Remove interactive form controls and highlight selected response
+      card.innerHTML = "";
+      const summary = document.createElement("div");
+      summary.className = "interactive-response-summary";
+      summary.textContent = `Answered: ${answer}`;
+      card.appendChild(summary);
+
+      resolve({ answer, selectedOptions: selected, freeText });
+    });
+  });
+}
+
+async function renderApprovalInChat(args) {
+  return new Promise((resolve) => {
+    const body = createMessage("assistant", "Approval Required");
+
+    const card = document.createElement("div");
+    card.className = "approval-card";
+
+    const badge = document.createElement("span");
+    badge.className = "risk-badge";
+    badge.textContent = args.actionType || "HIGH RISK";
+    card.appendChild(badge);
+
+    const desc = document.createElement("span");
+    desc.style.fontWeight = "700";
+    desc.textContent = args.description || "Action approval requested.";
+    card.appendChild(desc);
+
+    if (args.details && typeof args.details === "object") {
+      const detailsPre = document.createElement("pre");
+      detailsPre.style.fontSize = "11px";
+      detailsPre.style.marginTop = "6px";
+      detailsPre.textContent = JSON.stringify(args.details, null, 2);
+      card.appendChild(detailsPre);
+    }
+
+    const actionsRow = document.createElement("div");
+    actionsRow.style.display = "flex";
+    actionsRow.style.gap = "8px";
+    actionsRow.style.marginTop = "10px";
+
+    const allowBtn = document.createElement("button");
+    allowBtn.className = "btn primary small";
+    allowBtn.textContent = "Approve";
+
+    const denyBtn = document.createElement("button");
+    denyBtn.className = "btn danger small";
+    denyBtn.textContent = "Reject";
+
+    actionsRow.appendChild(allowBtn);
+    actionsRow.appendChild(denyBtn);
+    card.appendChild(actionsRow);
+
+    body.appendChild(card);
+    scrollToBottom();
+
+    const finalize = (approved) => {
+      card.innerHTML = "";
+      const summary = document.createElement("div");
+      summary.className = "interactive-response-summary";
+      summary.style.background = approved ? "var(--green)" : "var(--danger)";
+      summary.textContent = approved ? "Approved" : "Rejected";
+      card.appendChild(summary);
+
+      resolve({ approved, decision: approved ? "approved" : "rejected" });
+    };
+
+    allowBtn.addEventListener("click", () => finalize(true));
+    denyBtn.addEventListener("click", () => finalize(false));
+  });
+}
+
+async function renderPlanInChat(args) {
+  return new Promise((resolve) => {
+    const body = createMessage("assistant", "Proposed Plan");
+
+    const card = document.createElement("div");
+    card.className = "plan-card";
+
+    const title = document.createElement("h4");
+    title.textContent = args.title || "Plan Overview";
+    card.appendChild(title);
+
+    const ol = document.createElement("ol");
+    ol.className = "plan-steps-list";
+    (args.steps || []).forEach((stepText) => {
+      const li = document.createElement("li");
+      li.textContent = stepText;
+      ol.appendChild(li);
+    });
+    card.appendChild(ol);
+
+    if (args.notes) {
+      const notes = document.createElement("div");
+      notes.className = "plan-notes";
+      notes.textContent = args.notes;
+      card.appendChild(notes);
+    }
+
+    const actionsRow = document.createElement("div");
+    actionsRow.style.display = "flex";
+    actionsRow.style.gap = "8px";
+    actionsRow.style.marginTop = "10px";
+
+    const approveBtn = document.createElement("button");
+    approveBtn.className = "btn primary small";
+    approveBtn.textContent = "Approve Plan";
+
+    const modifyInput = document.createElement("input");
+    modifyInput.type = "text";
+    modifyInput.placeholder = "Feedback or modifications...";
+    modifyInput.className = "question-free-text";
+    modifyInput.style.flex = "1";
+
+    const rejectBtn = document.createElement("button");
+    rejectBtn.className = "btn danger small";
+    rejectBtn.textContent = "Reject";
+
+    actionsRow.appendChild(approveBtn);
+    actionsRow.appendChild(rejectBtn);
+    card.appendChild(modifyInput);
+    card.appendChild(actionsRow);
+
+    body.appendChild(card);
+    scrollToBottom();
+
+    const finishPlan = (approved) => {
+      const feedback = modifyInput.value.trim();
+      card.innerHTML = "";
+      const summary = document.createElement("div");
+      summary.className = "interactive-response-summary";
+      summary.style.background = approved ? "var(--green)" : "var(--danger)";
+      summary.textContent = approved 
+        ? (feedback ? `Plan Approved with feedback: "${feedback}"` : "Plan Approved")
+        : (feedback ? `Plan Rejected with feedback: "${feedback}"` : "Plan Rejected");
+      card.appendChild(summary);
+
+      resolve({ approved, feedback });
+    };
+
+    approveBtn.addEventListener("click", () => finishPlan(true));
+    rejectBtn.addEventListener("click", () => finishPlan(false));
+  });
+}
+
+async function onExportRiskPatterns() {
+  chrome.runtime.sendMessage({ type: "exportRiskPatterns" }, (response) => {
+    if (response && response.ok) {
+      const blob = new Blob([response.data], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `risk-patterns-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addSystem("Exported risk patterns.");
+    } else {
+      addError("Failed to export risk patterns.");
+    }
+  });
+}
+
+function onImportRiskFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const jsonString = e.target.result;
+      chrome.runtime.sendMessage({ type: "importRiskPatterns", jsonString }, (res) => {
+        if (res && res.ok) {
+          addSystem(`Successfully imported risk patterns.`);
+        } else {
+          addError(`Failed to import risk patterns: ${res?.error || "Unknown error"}`);
+        }
+      });
+    } catch (err) {
+      addError(`Invalid JSON file: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
 }
 })();

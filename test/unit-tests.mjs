@@ -27,7 +27,10 @@ const ROOT = resolve(__dirname, "..");
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function loadFile(name) {
-  return readFileSync(resolve(ROOT, name), "utf-8");
+  if (name.startsWith("test/")) {
+    return readFileSync(resolve(ROOT, name), "utf-8");
+  }
+  return readFileSync(resolve(ROOT, "public", name), "utf-8");
 }
 
 function evalInGlobalContext(code) {
@@ -879,5 +882,20 @@ describe("tools-schema.js — complete tool list", () => {
       true,
       "http_request should require network permission"
     );
+  });
+
+  it("all guardrail & plan mode tools are present in AGENT_TOOLS", () => {
+    const guardrailTools = [
+      "ask_user_question",
+      "request_approval",
+      "submit_plan",
+      "record_risk_assessment",
+      "assess_page_risk"
+    ];
+
+    const toolNames = globalThis.AGENT_TOOLS.map((t) => t.name);
+    for (const name of guardrailTools) {
+      assert.ok(toolNames.includes(name), `Missing guardrail tool: ${name}`);
+    }
   });
 });

@@ -69,6 +69,9 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
       case "get_images":
         return getImages(args);
 
+      case "assess_page_risk":
+        return scanPageForRisks(args);
+
       default:
         throw new Error(`Unknown content tool: ${tool}`);
     }
@@ -708,6 +711,92 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
       title: document.title,
       count: images.length,
       images
+    };
+  }
+
+  function scanPageForRisks(args = {}) {
+    const risks = [];
+    const url = location.href.toLowerCase();
+
+    // 1. URL pattern risks
+    const deployDomains = ["play.google.com/console", "appstoreconnect.apple.com", "vercel.com", "netlify.app", "console.aws.amazon.com", "dashboard.heroku.com"];
+    if (deployDomains.some((d) => url.includes(d))) {
+      risks.push({
+        type: "deployment_url",
+        risk: "high",
+        description: `Page URL matches developer/deployment console: ${location.hostname}`
+      });
+    }
+
+    const checkoutKeywords = ["checkout", "cart", "payment", "subscribe", "buy", "billing"];
+    if (checkoutKeywords.some((kw) => url.includes(kw))) {
+      risks.push({
+        type: "payment_url",
+        risk: "high",
+        description: `Page URL indicates payment/checkout context: ${location.pathname}`
+      });
+    }
+
+    // 2. High-risk elements
+    const submitBtns = Array.from(document.querySelectorAll('form button[type="submit"], form input[type="submit"], button[type="submit"]'));
+    submitBtns.forEach((btn, idx) => {
+      if (isVisible(btn)) {
+        btn.setAttribute("data-llm-agent-risk", "high");
+        risks.push({
+          type: "form_submission",
+          risk: "high",
+          element: btn.tagName.toLowerCase(),
+          text: (btn.innerText || btn.value || "").trim().slice(0, 50),
+          selector: btn.id ? `#${btn.id}` : `button[type="submit"]:nth-of-type(${idx + 1})`
+        });
+      }
+    });
+
+    const actionElements = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
+    const deleteRegex = /\b(delete|remove|destroy|cancel subscription|erase|clear all)\b/i;
+    const paymentRegex = /\b(pay|buy|place order|checkout|subscribe|purchase|confirm payment)\b/i;
+
+    actionElements.forEach((el) => {
+      if (!isVisible(el)) return;
+      const text = (el.innerText || el.value || el.title || el.ariaLabel || "").trim();
+      
+      if (deleteRegex.test(text)) {
+        el.setAttribute("data-llm-agent-risk", "high");
+        risks.push({
+          type: "deletion",
+          risk: "high",
+          text,
+          tag: el.tagName.toLowerCase()
+        });
+      } else if (paymentRegex.test(text)) {
+        el.setAttribute("data-llm-agent-risk", "high");
+        risks.push({
+          type: "purchase",
+          risk: "high",
+          text,
+          tag: el.tagName.toLowerCase()
+        });
+      }
+    });
+
+    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+    fileInputs.forEach((input) => {
+      if (isVisible(input)) {
+        input.setAttribute("data-llm-agent-risk", "medium");
+        risks.push({
+          type: "file_upload",
+          risk: "medium",
+          name: input.name || input.id || "file_input"
+        });
+      }
+    });
+
+    return {
+      url: location.href,
+      title: document.title,
+      riskCount: risks.length,
+      hasHighRisk: risks.some((r) => r.risk === "high"),
+      risks
     };
   }
 }

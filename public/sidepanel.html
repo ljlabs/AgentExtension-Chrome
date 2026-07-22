@@ -23,6 +23,7 @@
     </div>
 
     <div class="header-actions">
+      <button id="planModeBtn" class="btn small" type="button" title="Toggle Plan Mode">Plan: OFF</button>
       <button id="editBtn" class="btn small" type="button">Edit</button>
       <button id="rebindBtn" class="btn small" type="button">Rebind</button>
       <button id="settingsBtn" class="btn small" type="button">Settings</button>
@@ -118,7 +119,15 @@ https://*.example.com
       <textarea id="systemPromptInput" rows="6" placeholder="Optional instructions for the agent"></textarea>
     </label>
 
-    <div class="row">
+    <hr style="border:1px solid var(--ink); margin: 15px 0;" />
+    <h3>Agent Risk Patterns</h3>
+    <div class="row" style="gap: 8px;">
+      <button id="exportRiskPatternsBtn" class="btn small" type="button">Export Patterns</button>
+      <button id="importRiskPatternsBtn" class="btn small" type="button">Import Patterns</button>
+      <input id="importRiskFileInput" type="file" accept=".json" class="hidden" />
+    </div>
+
+    <div class="row" style="margin-top: 15px;">
       <button id="saveSettingsBtn" class="btn primary" type="button">Save settings</button>
     </div>
   </section>

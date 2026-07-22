@@ -456,6 +456,124 @@
         required: ["action"],
         additionalProperties: false
       }
+    },
+    {
+      name: "ask_user_question",
+      description: "Ask clarifying question(s) to the user with options (radio/checkbox) and/or free text.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "The main question or prompt for the user."
+          },
+          options: {
+            type: "array",
+            items: { type: "string" },
+            description: "List of recommended option strings for the user to choose from."
+          },
+          multiSelect: {
+            type: "boolean",
+            default: false,
+            description: "Set to true to allow user to check multiple options."
+          },
+          allowFreeText: {
+            type: "boolean",
+            default: true,
+            description: "Set to true to allow user to write custom input."
+          }
+        },
+        required: ["question"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "request_approval",
+      description: "Request user approval before executing high-risk actions (e.g., submitting forms, purchases, deployments, deletions).",
+      parameters: {
+        type: "object",
+        properties: {
+          actionType: {
+            type: "string",
+            description: "Type of high-risk action (form_submission, purchase, deployment, deletion, message_send, file_transfer)."
+          },
+          description: {
+            type: "string",
+            description: "Explanation of what action will be performed and why approval is needed."
+          },
+          details: {
+            type: "object",
+            description: "Optional key-value context details (e.g. form inputs, target URL, element text)."
+          }
+        },
+        required: ["actionType", "description"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "submit_plan",
+      description: "Submit a multi-step plan for user review and approval before executing complex operations.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Title of the proposed plan."
+          },
+          steps: {
+            type: "array",
+            items: { type: "string" },
+            description: "Ordered list of step descriptions."
+          },
+          notes: {
+            type: "string",
+            description: "Optional background context, potential risks, or assumptions."
+          }
+        },
+        required: ["title", "steps"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "record_risk_assessment",
+      description: "Record a newly identified risk pattern (selector, urlPattern, action, risk level) to persist in storage for future detection.",
+      parameters: {
+        type: "object",
+        properties: {
+          patternType: {
+            type: "string",
+            description: "Type of risk pattern: selector, urlPattern, textPattern, inputType."
+          },
+          pattern: {
+            type: "string",
+            description: "The pattern string (e.g., CSS selector, URL glob/regex, input type, text regex)."
+          },
+          action: {
+            type: "string",
+            description: "Action associated with risk: click, submit, navigate, type_text, upload."
+          },
+          riskLevel: {
+            type: "string",
+            enum: ["high", "medium", "low"],
+            description: "Assessed risk level."
+          },
+          reason: {
+            type: "string",
+            description: "Reasoning for the risk classification."
+          }
+        },
+        required: ["patternType", "pattern", "action", "riskLevel"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "assess_page_risk",
+      description: "Scan current page elements and URL for potential high-risk targets based on default and learned risk patterns.",
+      parameters: {
+        type: "object",
+        properties: {},
+        additionalProperties: false
+      }
     }
   ];
 

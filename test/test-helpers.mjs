@@ -205,7 +205,7 @@ export function loadBackground(overrides = {}) {
     isFinite: globalThis.isFinite
   });
 
-  const code = readFileSync(resolve(ROOT, "background.js"), "utf-8");
+  const code = readFileSync(resolve(ROOT, "public", "background.js"), "utf-8");
   vm.runInContext(code, sandbox);
 
   return { sandbox, chrome };
@@ -217,7 +217,7 @@ export function loadBackground(overrides = {}) {
  * accessible on the returned context.
  */
 export function loadSidepanel() {
-  let code = readFileSync(resolve(ROOT, "sidepanel.js"), "utf-8");
+  let code = readFileSync(resolve(ROOT, "public", "sidepanel.js"), "utf-8");
 
   // Strip the IIFE wrapper so declarations become sandbox-top-level
   code = code.replace(/^\(\(\) => \{/, "").replace(/\}\)\(\);?\s*$/, "");
