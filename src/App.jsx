@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useStorage } from "./hooks/useStorage";
 import Sidebar from "./components/Sidebar";
 import MonacoEditor from "./components/MonacoEditor";
@@ -74,6 +74,38 @@ export default function App() {
     setEditorContent("");
     setDirty(false);
   }, []);
+
+  // Real-time update for currently selected item when background/agent updates storage
+  useEffect(() => {
+    if (!selectedId) return;
+
+    const storageKey = `agent_${activeTab}`;
+    const handleStorageChange = async (changes, areaName) => {
+      if (areaName === "local" && changes[storageKey]) {
+        const item = await storage.readItem(selectedId);
+        if (item) {
+          setSelectedItem(item);
+          // Only update editor content if user hasn't made unsaved local edits
+          if (!dirty) {
+            setEditorContent(getItemContent(activeTab, item));
+          }
+        } else {
+          // Item was deleted externally
+          setSelectedId(null);
+          setSelectedItem(null);
+          setEditorContent("");
+          setDirty(false);
+        }
+      }
+    };
+
+    if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(handleStorageChange);
+      return () => {
+        chrome.storage.onChanged.removeListener(handleStorageChange);
+      };
+    }
+  }, [activeTab, selectedId, dirty, storage]);
 
   const handleSelectItem = useCallback(async (id) => {
     const item = await storage.readItem(id);

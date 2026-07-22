@@ -39,7 +39,21 @@ export function useStorage(toolName) {
 
   useEffect(() => {
     loadList();
-  }, [loadList]);
+
+    const storageKey = `agent_${toolName}`;
+    const handleStorageChange = (changes, areaName) => {
+      if (areaName === "local" && changes[storageKey]) {
+        loadList();
+      }
+    };
+
+    if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(handleStorageChange);
+      return () => {
+        chrome.storage.onChanged.removeListener(handleStorageChange);
+      };
+    }
+  }, [loadList, toolName]);
 
   const readItem = useCallback(async (id) => {
     const result = await sendMessage({
