@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Local LLM Browser Agent",
+  "version": "1.0.0",
+  "description": "Neobrutalist side-panel agent for local LLMs with tool validation and bound-tab control.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "scripting",
+    "tabs",
+    "debugger"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Local LLM Agent"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

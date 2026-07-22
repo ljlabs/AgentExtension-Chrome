@@ -1,0 +1,377 @@
+:root {
+  --ink: #111111;
+  --bg: #fff7fb;
+  --card: #ffffff;
+  --pink: #ffd6e8;
+  --green: #c7f9cc;
+  --blue: #bde0fe;
+  --yellow: #fff3b0;
+  --purple: #e4c1f9;
+  --orange: #ffd8a8;
+  --danger: #ff9999;
+  --shadow: 5px 5px 0 0 var(--ink);
+  --shadow-lg: 8px 8px 0 0 var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  width: 100%;
+  min-width: 320px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(135deg, var(--pink) 0%, var(--blue) 45%, var(--green) 100%);
+  color: var(--ink);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.app-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  background: var(--yellow);
+  border-bottom: 4px solid var(--ink);
+}
+
+.brand {
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--purple);
+  border: 3px solid var(--ink);
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+}
+
+.tab-info {
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--card);
+  border: 3px solid var(--ink);
+  box-shadow: var(--shadow);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  appearance: none;
+  cursor: pointer;
+  border: 3px solid var(--ink);
+  box-shadow: var(--shadow);
+  background: var(--orange);
+  color: var(--ink);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 10px 12px;
+  transition:
+    transform 80ms ease,
+    box-shadow 80ms ease;
+}
+
+.btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 6px 6px 0 0 var(--ink);
+}
+
+.btn:active {
+  transform: translate(5px, 5px);
+  box-shadow: none;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: var(--shadow);
+}
+
+.btn.small {
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.btn.primary {
+  background: var(--green);
+}
+
+.btn.danger {
+  background: var(--danger);
+}
+
+.settings {
+  margin: 12px;
+  padding: 12px;
+  background: var(--card);
+  border: 4px solid var(--ink);
+  box-shadow: var(--shadow-lg);
+  max-height: 45vh;
+  overflow: auto;
+}
+
+.settings h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+  text-transform: uppercase;
+}
+
+.settings label,
+.composer label {
+  display: block;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.settings input[type="text"],
+.settings input[type="password"],
+.settings input[type="number"],
+.settings select,
+.settings textarea,
+.composer textarea {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border: 3px solid var(--ink);
+  box-shadow: inset 3px 3px 0 rgba(17, 17, 17, 0.08);
+  background: #fff;
+  font: inherit;
+  font-weight: 600;
+}
+
+.settings textarea,
+.composer textarea {
+  resize: vertical;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.row {
+  margin: 12px 0;
+}
+
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--blue);
+  border: 3px solid var(--ink);
+  box-shadow: var(--shadow);
+  font-weight: 800;
+  margin: 0;
+}
+
+.toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #111;
+}
+
+.chat-log {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  border: 4px solid var(--ink);
+  box-shadow: var(--shadow-lg);
+  background: var(--card);
+  padding: 10px;
+}
+
+.message-title {
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 3px solid var(--ink);
+}
+
+.message-body p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-weight: 600;
+}
+
+.message-body p:last-child {
+  margin-bottom: 0;
+}
+
+.message.user {
+  background: var(--blue);
+}
+
+.message.assistant {
+  background: var(--green);
+}
+
+.message.tool {
+  background: var(--purple);
+}
+
+.message.system {
+  background: var(--yellow);
+}
+
+.message.error {
+  background: var(--danger);
+}
+
+.tool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chip {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 3px solid var(--ink);
+  background: var(--card);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.chip.ok {
+  background: var(--green);
+}
+
+.chip.invalid {
+  background: var(--danger);
+}
+
+pre {
+  margin: 8px 0 0;
+  padding: 8px;
+  background: #fff;
+  border: 3px solid var(--ink);
+  box-shadow: inset 3px 3px 0 rgba(17, 17, 17, 0.08);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  font-size: 12px;
+}
+
+.status {
+  margin: 0 12px 10px;
+  padding: 10px;
+  border: 3px solid var(--ink);
+  box-shadow: var(--shadow);
+  background: var(--orange);
+  font-weight: 900;
+}
+
+.composer {
+  padding: 12px;
+  background: var(--pink);
+  border-top: 4px solid var(--ink);
+}
+
+.composer textarea {
+  min-height: 72px;
+}
+
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 17, 17, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--yellow);
+  border: 4px solid var(--ink);
+  box-shadow: 10px 10px 0 0 var(--ink);
+  padding: 16px;
+}
+
+.modal h3 {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.modal p {
+  margin: 0 0 16px;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

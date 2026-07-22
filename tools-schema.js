@@ -1,0 +1,495 @@
+(function (global) {
+  "use strict";
+
+  const TARGET_PROPERTIES = {
+    ref: {
+      type: "string",
+      description: "Element ref from get_interactive_snapshot, for example e12."
+    },
+    selector: {
+      type: "string",
+      description: "CSS selector."
+    },
+    xpath: {
+      type: "string",
+      description: "XPath expression."
+    }
+  };
+
+  const TARGET_ANY_OF = [
+    { required: ["ref"] },
+    { required: ["selector"] },
+    { required: ["xpath"] }
+  ];
+
+  const AGENT_TOOLS = [
+    {
+      name: "get_page_info",
+      description: "Get metadata about the bound page: URL, title, ready state, viewport, meta description, and current selection.",
+      parameters: {
+        type: "object",
+        properties: {},
+        additionalProperties: false
+      }
+    },
+    {
+      name: "get_html",
+      description: "Get HTML from the bound page. By default scripts and styles are removed. Use selector/ref/xpath to target a subtree. Use maxLength to control size.",
+      parameters: {
+        type: "object",
+        properties: {
+          ...TARGET_PROPERTIES,
+          maxLength: {
+            type: "integer",
+            minimum: 1,
+            maximum: 1000000,
+            default: 120000
+          },
+          includeScripts: {
+            type: "boolean",
+            default: false
+          },
+          includeStyles: {
+            type: "boolean",
+            default: false
+          },
+          includeComments: {
+            type: "boolean",
+            default: false
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "get_text",
+      description: "Get visible text from the bound page or a targeted element.",
+      parameters: {
+        type: "object",
+        properties: {
+          ...TARGET_PROPERTIES,
+          maxLength: {
+            type: "integer",
+            minimum: 1,
+            maximum: 1000000,
+            default: 50000
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "get_interactive_snapshot",
+      description: "List interactive elements on the page and assign refs. Use these refs with click, type_text, set_value, press_key, and scroll_to.",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: {
+            type: "string",
+            description: "Optional CSS selector to narrow the snapshot."
+          },
+          maxElements: {
+            type: "integer",
+            minimum: 1,
+            maximum: 500,
+            default: 200
+          },
+          includeHidden: {
+            type: "boolean",
+            default: false
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "click",
+      description: "Click an element in the bound tab. Prefer using ref from get_interactive_snapshot.",
+      parameters: {
+        type: "object",
+        properties: {
+          ...TARGET_PROPERTIES,
+          waitAfterMs: {
+            type: "integer",
+            minimum: 0,
+            maximum: 15000,
+            default: 350
+          },
+          force: {
+            type: "boolean",
+            default: false,
+            description: "Click even if the element appears disabled."
+          }
+        },
+        anyOf: TARGET_ANY_OF,
+        additionalProperties: false
+      }
+    },
+    {
+      name: "type_text",
+      description: "Type text into an input, textarea, or contenteditable element.",
+      parameters: {
+        type: "object",
+        properties: {
+          ...TARGET_PROPERTIES,
+          text: {
+            type: "string"
+          },
+          clear: {
+            type: "boolean",
+            default: false,
+            description: "Clear existing value before typing."
+          },
+          pressEnter: {
+            type: "boolean",
+            default: false
+          },
+          force: {
+            type: "boolean",
+            default: false
+          }
+        },
+        required: ["text"],
+        anyOf: TARGET_ANY_OF,
+        additionalProperties: false
+      }
+    },
+    {
+      name: "set_value",
+      description: "Set the value of an input, textarea, select, checkbox, or radio.",
+      parameters: {
+        type: "object",
+        properties: {
+          ...TARGET_PROPERTIES,
+          value: {
+            type: ["string", "number", "boolean"],
+            description: "Value to set. For checkbox/radio, true/false-like values are interpreted as checked state."
+          }
+        },
+        required: ["value"],
+        anyOf: TARGET_ANY_OF,
+        additionalProperties: false
+      }
+    },
+    {
+      name: "press_key",
+      description: "Press a keyboard key on the active element or a targeted element. Examples: Enter, Tab, Escape, ArrowDown, a, b, c.",
+      parameters: {
+        type: "object",
+        properties: {
+          ...TARGET_PROPERTIES,
+          key: {
+            type: "string"
+          }
+        },
+        required: ["key"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "scroll_to",
+      description: "Scroll to an element, or scroll the window to x/y coordinates.",
+      parameters: {
+        type: "object",
+        properties: {
+          ...TARGET_PROPERTIES,
+          x: {
+            type: "integer",
+            minimum: 0
+          },
+          y: {
+            type: "integer",
+            minimum: 0
+          },
+          behavior: {
+            type: "string",
+            enum: ["auto", "smooth"],
+            default: "auto"
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "wait",
+      description: "Wait for a number of milliseconds before continuing.",
+      parameters: {
+        type: "object",
+        properties: {
+          ms: {
+            type: "integer",
+            minimum: 1,
+            maximum: 30000
+          }
+        },
+        required: ["ms"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "http_request",
+      description: "Make an HTTP request. Use for APIs or fetching other web pages. Only http/https allowed. Network permission may be requested.",
+      requiresNetworkPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string"
+          },
+          method: {
+            type: "string",
+            enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+            default: "GET"
+          },
+          headers: {
+            type: "object",
+            additionalProperties: {
+              type: "string"
+            }
+          },
+          body: {
+            type: ["string", "object", "array", "number", "boolean", "null"]
+          },
+          timeoutMs: {
+            type: "integer",
+            minimum: 1000,
+            maximum: 120000,
+            default: 30000
+          },
+          parseJson: {
+            type: "boolean",
+            default: true
+          },
+          maxChars: {
+            type: "integer",
+            minimum: 1000,
+            maximum: 2000000,
+            default: 200000
+          },
+          credentials: {
+            type: "string",
+            enum: ["omit", "same-origin", "include"],
+            default: "omit"
+          },
+          redirect: {
+            type: "string",
+            enum: ["follow", "error", "manual"],
+            default: "follow"
+          }
+        },
+        required: ["url"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "screenshot",
+      description: "Capture a screenshot of the bound tab. Requires explicit user permission before image data is sent to the LLM.",
+      requiresImagePermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          format: {
+            type: "string",
+            enum: ["jpeg", "png", "webp"],
+            default: "jpeg"
+          },
+          quality: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            default: 70
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "get_images",
+      description: "List images on the page. If includeBase64 is true, image pixels are fetched and require explicit user permission.",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: {
+            type: "string",
+            default: "img"
+          },
+          maxImages: {
+            type: "integer",
+            minimum: 1,
+            maximum: 50,
+            default: 20
+          },
+          includeBase64: {
+            type: "boolean",
+            default: false
+          },
+          maxImageBytes: {
+            type: "integer",
+            minimum: 10000,
+            maximum: 10000000,
+            default: 1500000
+          }
+        },
+        additionalProperties: false
+      }
+    }
+  ];
+
+  const AGENT_TOOL_MAP = Object.fromEntries(AGENT_TOOLS.map((tool) => [tool.name, tool]));
+
+  function getOpenAiTools() {
+    return AGENT_TOOLS.map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
+      }
+    }));
+  }
+
+  function makeCallId(index) {
+    return `call_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function truncateString(value, max = 500) {
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    if (!text) return "";
+    return text.length > max ? `${text.slice(0, max)}...` : text;
+  }
+
+  function validateToolCall(rawToolCall, index = 0) {
+    const errors = [];
+
+    const id = rawToolCall && rawToolCall.id ? String(rawToolCall.id) : makeCallId(index);
+    const fn = (rawToolCall && rawToolCall.function) || rawToolCall || {};
+    const name = fn.name || rawToolCall?.name;
+
+    if (!name) {
+      return {
+        ok: false,
+        includeInAssistant: false,
+        name: "unknown_tool",
+        normalized: {
+          id,
+          type: "function",
+          function: {
+            name: "unknown_tool",
+            arguments: "{}"
+          }
+        },
+        args: {},
+        errors: [{ path: "function.name", message: "Missing tool name." }],
+        requiresImagePermission: false,
+        requiresNetworkPermission: false
+      };
+    }
+
+    const tool = AGENT_TOOL_MAP[name];
+    let argsInput = fn.arguments ?? rawToolCall?.arguments ?? {};
+    let args = argsInput;
+
+    if (typeof argsInput === "string") {
+      const trimmed = argsInput.trim();
+      if (!trimmed) {
+        args = {};
+      } else {
+        try {
+          args = JSON.parse(trimmed);
+        } catch (err) {
+          return {
+            ok: false,
+            includeInAssistant: Boolean(tool),
+            name: String(name),
+            normalized: {
+              id,
+              type: "function",
+              function: {
+                name: String(name),
+                arguments: "{}"
+              }
+            },
+            args: {},
+            errors: [
+              {
+                path: "function.arguments",
+                message: `Arguments are not valid JSON: ${err.message}`,
+                rawArguments: truncateString(argsInput, 500)
+              }
+            ],
+            requiresImagePermission: Boolean(tool && tool.requiresImagePermission),
+            requiresNetworkPermission: Boolean(tool && tool.requiresNetworkPermission)
+          };
+        }
+      }
+    }
+
+    if (!tool) {
+      return {
+        ok: false,
+        includeInAssistant: false,
+        name: String(name),
+        normalized: {
+          id,
+          type: "function",
+          function: {
+            name: String(name),
+            arguments: "{}"
+          }
+        },
+        args: args && typeof args === "object" ? args : {},
+        errors: [
+          {
+            path: "function.name",
+            message: `Unknown tool "${name}". Available tools: ${AGENT_TOOLS.map((t) => t.name).join(", ")}.`
+          }
+        ],
+        requiresImagePermission: false,
+        requiresNetworkPermission: false
+      };
+    }
+
+    let result;
+    try {
+      result = global.normalizeAndValidate(args, tool.parameters || {});
+    } catch (err) {
+      result = {
+        valid: false,
+        errors: [{ path: "arguments", message: err.message }],
+        value: {}
+      };
+    }
+
+    let normalizedArgs = result.value;
+    if (normalizedArgs === undefined || normalizedArgs === null || typeof normalizedArgs !== "object" || Array.isArray(normalizedArgs)) {
+      normalizedArgs = {};
+    }
+
+    const requiresImagePermission =
+      Boolean(tool.requiresImagePermission) ||
+      (tool.name === "get_images" && normalizedArgs.includeBase64 === true);
+
+    return {
+      ok: result.valid,
+      includeInAssistant: true,
+      name: tool.name,
+      normalized: {
+        id,
+        type: "function",
+        function: {
+          name: tool.name,
+          arguments: JSON.stringify(normalizedArgs)
+        }
+      },
+      args: normalizedArgs,
+      errors: result.errors,
+      requiresImagePermission,
+      requiresNetworkPermission: Boolean(tool.requiresNetworkPermission)
+    };
+  }
+
+  global.AGENT_TOOLS = AGENT_TOOLS;
+  global.AGENT_TOOL_MAP = AGENT_TOOL_MAP;
+  global.getOpenAiTools = getOpenAiTools;
+  global.validateToolCall = validateToolCall;
+})(globalThis);
