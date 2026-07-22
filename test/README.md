@@ -31,7 +31,6 @@ Then in Chrome:
    - Chat path: `/chat/completions`
    - Model: `mock-agent`
    - Max tool steps: `12`
-   - Attach page HTML: enabled
    - Auto-allow localhost: enabled
 4. Click **Refresh models**, confirm `mock-agent` appears
 5. Click **Save settings**

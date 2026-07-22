@@ -18,7 +18,6 @@
   const userInput = document.getElementById("userInput");
   const sendBtn = document.getElementById("sendBtn");
   const clearBtn = document.getElementById("clearBtn");
-  const attachHtmlToggle = document.getElementById("attachHtmlToggle");
   const modelSelect = document.getElementById("modelSelect");
 
   if (!chatLog || !sendBtn || !userInput) {
@@ -42,9 +41,6 @@
 
   // Make sure the side panel state knows the selected model.
   modelSelect.dispatchEvent(new Event("change"));
-
-  // Enable HTML attachment for this test.
-  attachHtmlToggle.checked = true;
 
   console.log("Starting full side panel test...");
 

@@ -167,7 +167,7 @@ async function handleExecuteTool(message) {
       const fetched = await fetchImagesBase64(metadata.data?.images || [], args);
       return {
         ok: true,
-         {
+        data: {
           ...metadata.data,
           images: fetched.images,
           _images: fetched._images,
@@ -556,7 +556,7 @@ async function clickTool(tabId, args) {
     if (after.status === "loading" || after.url !== beforeUrl) {
       return {
         ok: true,
-         {
+        data: {
           clicked: true,
           navigated: true,
           url: after.url,
@@ -588,11 +588,11 @@ async function screenshotTool(tabId, args) {
 
     return {
       ok: true,
-       {
+      data: {
         format,
         mime,
         note: "Screenshot captured from bound tab.",
-        _images: [`${mime};base64,${base64}`]
+        _images: [`data:${mime};base64,${base64}`]
       }
     };
   } catch (err) {
@@ -607,7 +607,7 @@ async function screenshotTool(tabId, args) {
 
         return {
           ok: true,
-           {
+          data: {
             format: fallbackFormat,
             mime: fallbackFormat === "png" ? "image/png" : "image/jpeg",
             note: "Screenshot captured via visible-tab fallback.",
@@ -704,8 +704,8 @@ async function fetchImagesBase64(images, args) {
       continue;
     }
 
-    if (image.src.startsWith("")) {
-      const match = image.src.match(/^(image\/[a-zA-Z0-9+.]+);base64,(.*)$/);
+    if (image.src.startsWith("data:")) {
+      const match = image.src.match(/^data:(image\/[a-zA-Z0-9+.]+);base64,(.*)$/);
       if (match && match[2].length <= Math.ceil((maxBytes * 4) / 3)) {
         dataUrls.push(image.src);
         out.push({ ...image, mime: match[1], included: true });
@@ -767,5 +767,5 @@ async function blobToDataUrl(blob) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
   }
 
-  return `${blob.type};base64,${btoa(binary)}`;
+  return `data:${blob.type};base64,${btoa(binary)}`;
 }

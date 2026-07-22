@@ -431,6 +431,8 @@
     }
   ];
 
+  const AGENT_TOOL_MAP = Object.fromEntries(AGENT_TOOLS.map((tool) => [tool.name, tool]));
+
   function getOpenAiTools() {
     return AGENT_TOOLS.map((tool) => ({
       type: "function",

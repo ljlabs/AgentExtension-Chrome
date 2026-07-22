@@ -21,7 +21,6 @@ const DEFAULT_SETTINGS = {
   temperature: 0.2,
   maxTokens: 2048,
   maxToolSteps: 12,
-  maxHtmlChars: 120000,
   maxToolResultChars: 20000,
   requestTimeoutMs: 120000,
   toolTimeoutMs: 60000,
@@ -34,17 +33,19 @@ const DEFAULT_SETTINGS = {
 const TOOL_MAP = globalThis.AGENT_TOOL_MAP || {};
 
 // --- Dev console logging ---
+const DEBUG = true;
+
 function devLog(label, ...args) {
-  console.log(`%c[Agent]%c ${label}`, "color:#888;font-weight:bold", "color:inherit", ...args);
+  if (DEBUG) console.log(`%c[Agent]%c ${label}`, "color:#888;font-weight:bold", "color:inherit", ...args);
 }
 function devGroup(label) {
-  console.group(`%c[Agent]%c ${label}`, "color:#888;font-weight:bold", "color:inherit");
+  if (DEBUG) console.group(`%c[Agent]%c ${label}`, "color:#888;font-weight:bold", "color:inherit");
 }
 function devGroupEnd() {
-  console.groupEnd();
+  if (DEBUG) console.groupEnd();
 }
 function devWarn(label, ...args) {
-  console.warn(`%c[Agent]%c ${label}`, "color:#f80;font-weight:bold", "color:inherit", ...args);
+  if (DEBUG) console.warn(`%c[Agent]%c ${label}`, "color:#f80;font-weight:bold", "color:inherit", ...args);
 }
 
 const state = {
@@ -283,7 +284,6 @@ function normalizeSettings(input) {
     temperature: Number(input.temperature),
     maxTokens: Number.parseInt(input.maxTokens, 10),
     maxToolSteps: Number.parseInt(input.maxToolSteps, 10),
-    maxHtmlChars: Number.parseInt(input.maxHtmlChars, 10),
     maxToolResultChars: Number.parseInt(input.maxToolResultChars, 10),
     requestTimeoutMs: Number.parseInt(input.requestTimeoutMs, 10),
     toolTimeoutMs: Number.parseInt(input.toolTimeoutMs, 10),
@@ -322,7 +322,6 @@ async function saveSettings() {
     temperature: dom.temperatureInput.value,
     maxTokens: dom.maxTokensInput.value,
     maxToolSteps: dom.maxToolStepsInput.value,
-    maxHtmlChars: dom.maxHtmlCharsInput.value,
     maxToolResultChars: dom.maxToolResultCharsInput.value,
     requestTimeoutMs: dom.requestTimeoutInput.value,
     toolTimeoutMs: dom.toolTimeoutInput.value,
@@ -712,7 +711,7 @@ async function runAgent() {
             result = await executeToolWithPermissions(validation.name, validation.args || {});
           }
 
-          devLog(`Tool result: ${validation.name}`, { ok: result?.ok,  result?.data ? JSON.stringify(result.data).slice(0, 300) : result?.error });
+          devLog(`Tool result: ${validation.name}`, { ok: result?.ok, data: result?.data ? JSON.stringify(result.data).slice(0, 300) : result?.error });
 
           const imagePayloads = extractImages(result);
 
@@ -731,28 +730,17 @@ async function runAgent() {
             content: stringifyToolResult(result)
           };
 
+          if (imagePayloads.length && settings.modelSupportsVision && !state.visionFailed) {
+            toolMessage.content = [
+              { type: "text", text: stringifyToolResult(result) },
+              ...imagePayloads.map((url) => ({ type: "image_url", image_url: { url } }))
+            ];
+          }
+
           apiMessages.push(toolMessage);
           stepMessages.push(toolMessage);
 
           addToolResult(validation, result);
-
-          if (imagePayloads.length && settings.modelSupportsVision && !state.visionFailed) {
-            const imageMessage = {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: `Images for tool call ${validation.normalized.id}:`
-                },
-                ...imagePayloads.map((url) => ({
-                  type: "image_url",
-                  image_url: { url }
-                }))
-              ]
-            };
-
-            apiMessages.push(imageMessage);
-          }
         }
 
         const notIncluded = validations.filter((validation) => !validation.includeInAssistant);
