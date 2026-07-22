@@ -4,8 +4,20 @@ Deterministic end-to-end test for the Local LLM Browser Agent side panel.
 
 ## Quick Start
 
+Run the PowerShell test script (recommended — handles mock server lifecycle automatically):
+
+```powershell
+# From project root — runs smoke tests, starts/stops mock server
+pwsh test/run-tests.ps1
+
+# Also open Chrome with the test page for full E2E testing
+pwsh test/run-tests.ps1 -WithChrome
+```
+
+Or manually:
+
 ```bash
-# From project root
+# Start the mock server (reads TEST_PORT from .env)
 node test/mock-llm-server.mjs
 ```
 
@@ -52,6 +64,17 @@ Edit `.env` in the project root:
 TEST_PORT=8001
 ```
 
+The PowerShell test script and mock server both read this value automatically.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `mock-llm-server.mjs` | Mock OpenAI-compatible LLM server + test page + API endpoints |
+| `sidepanel-test.js` | Paste into side panel DevTools console for full E2E test |
+| `run-tests.ps1` | PowerShell orchestrator: starts mock server, runs smoke tests, cleans up |
+| `README.md` | This file |
+
 ## Mock Server Endpoints
 
 | Path | Method | Description |
@@ -61,3 +84,4 @@ TEST_PORT=8001
 | `/models` | GET | Returns `mock-agent` model list |
 | `/chat/completions` | POST | Mock LLM responses (scripted tool-call flow) |
 | `/test-api` | GET | Network fetch test target |
+| `/test-config` | GET | Returns server config (port, URLs) |

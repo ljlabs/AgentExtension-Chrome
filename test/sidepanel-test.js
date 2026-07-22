@@ -87,15 +87,22 @@
 
       console.log("Finding test page tab...");
 
+      // Read the base URL from the side panel's stored settings to derive the port.
+      const stored = await new Promise((resolve) => {
+        chrome.storage.local.get("settings", (data) => resolve(data?.settings || {}));
+      });
+      const baseUrl = stored.baseUrl || "http://localhost:8001";
+      const origin = baseUrl.replace(/\/+$/, "");
+
       const tabs = await chrome.tabs.query({
-        url: "http://localhost:8001/*"
+        url: `${origin}/*`
       });
 
       const testTab = tabs.find((tab) => (tab.url || "").includes("/test-page"));
 
       if (!testTab) {
         throw new Error(
-          "Test page tab not found. Make sure http://localhost:8001/test-page is open."
+          `Test page tab not found. Make sure ${origin}/test-page is open.`
         );
       }
 
