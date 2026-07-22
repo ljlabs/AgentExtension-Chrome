@@ -135,6 +135,22 @@ async function handleExecuteTool(message) {
     return { ok: true, data: { waitedMs: ms } };
   }
 
+  if (tool === "read_browser_storage") {
+    return await handleReadBrowserStorage(args);
+  }
+
+  if (tool === "write_browser_storage") {
+    return await handleWriteBrowserStorage(args);
+  }
+
+  if (tool === "memories") {
+    return await handleMemories(args);
+  }
+
+  if (tool === "skills") {
+    return await handleSkills(args);
+  }
+
   if (!tabId) {
     return { ok: false, error: "No bound tab. Rebind the agent to a tab." };
   }
@@ -151,7 +167,7 @@ async function handleExecuteTool(message) {
       const fetched = await fetchImagesBase64(metadata.data?.images || [], args);
       return {
         ok: true,
-        data: {
+         {
           ...metadata.data,
           images: fetched.images,
           _images: fetched._images,
@@ -169,6 +185,204 @@ async function handleExecuteTool(message) {
 
   return await sendPageTool(tabId, tool, args, true);
 }
+
+// --- Browser Storage Tools ---
+
+async function handleReadBrowserStorage(args) {
+  try {
+    const keys = Array.isArray(args.keys) ? args.keys : [];
+    const result = await chrome.storage.local.get(keys.length ? keys : null);
+    return { ok: true, data: result };
+  } catch (err) {
+    return { ok: false, error: `Storage read failed: ${err.message}` };
+  }
+}
+
+async function handleWriteBrowserStorage(args) {
+  try {
+    if (!args.data || typeof args.data !== "object") {
+      return { ok: false, error: "data must be an object with key-value pairs." };
+    }
+    await chrome.storage.local.set(args.data);
+    return { ok: true, data: { stored: Object.keys(args.data) } };
+  } catch (err) {
+    return { ok: false, error: `Storage write failed: ${err.message}` };
+  }
+}
+
+// --- Memories Tool ---
+
+async function handleMemories(args) {
+  const action = args.action;
+
+  try {
+    const stored = await chrome.storage.local.get("agent_memories");
+    const memories = stored.agent_memories || { memories: [] };
+
+    if (action === "list") {
+      const summaries = memories.memories.map((m) => ({
+        id: m.id,
+        title: m.title,
+        created: m.created,
+        updated: m.updated
+      }));
+      return { ok: true, data: { count: summaries.length, memories: summaries } };
+    }
+
+    if (action === "read") {
+      if (!args.id) return { ok: false, error: "id is required for read." };
+      const memory = memories.memories.find((m) => m.id === args.id);
+      if (!memory) return { ok: false, error: `Memory "${args.id}" not found.` };
+      return { ok: true, data: memory };
+    }
+
+    if (action === "write") {
+      const title = args.title || "Untitled";
+      const content = args.content || "";
+
+      if (args.id) {
+        // Update existing
+        const idx = memories.memories.findIndex((m) => m.id === args.id);
+        if (idx === -1) return { ok: false, error: `Memory "${args.id}" not found.` };
+        memories.memories[idx].title = title;
+        memories.memories[idx].content = content;
+        memories.memories[idx].updated = new Date().toISOString();
+      } else {
+        // Create new
+        const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        memories.memories.push({
+          id,
+          title,
+          content,
+          created: new Date().toISOString(),
+          updated: new Date().toISOString()
+        });
+      }
+
+      await chrome.storage.local.set({ agent_memories: memories });
+      return { ok: true, data: { id: args.id || memories.memories[memories.memories.length - 1].id } };
+    }
+
+    if (action === "delete") {
+      if (!args.id) return { ok: false, error: "id is required for delete." };
+      const idx = memories.memories.findIndex((m) => m.id === args.id);
+      if (idx === -1) return { ok: false, error: `Memory "${args.id}" not found.` };
+      memories.memories.splice(idx, 1);
+      await chrome.storage.local.set({ agent_memories: memories });
+      return { ok: true, data: { deleted: args.id } };
+    }
+
+    return { ok: false, error: `Unknown memories action: ${action}. Use list, read, write, or delete.` };
+  } catch (err) {
+    return { ok: false, error: `Memories tool failed: ${err.message}` };
+  }
+}
+
+// --- Skills Tool ---
+
+function parseFrontMatter(text) {
+  const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!match) return { meta: {}, body: text };
+
+  const meta = {};
+  const lines = match[1].split("\n");
+  for (const line of lines) {
+    const kv = line.match(/^(\w+):\s*(.+)$/);
+    if (kv) {
+      let val = kv[2].trim();
+      // Parse YAML array [a, b, c]
+      if (val.startsWith("[") && val.endsWith("]")) {
+        val = val.slice(1, -1).split(",").map((s) => s.trim().replace(/^["']|["']$/g, ""));
+      }
+      meta[kv[1]] = val;
+    }
+  }
+
+  return { meta, body: match[2] };
+}
+
+function buildFrontMatter(meta, body) {
+  let fm = "---\n";
+  for (const [key, val] of Object.entries(meta)) {
+    if (Array.isArray(val)) {
+      fm += `${key}: [${val.join(", ")}]\n`;
+    } else {
+      fm += `${key}: ${val}\n`;
+    }
+  }
+  fm += `---\n${body}`;
+  return fm;
+}
+
+async function handleSkills(args) {
+  const action = args.action;
+
+  try {
+    const stored = await chrome.storage.local.get("agent_skills");
+    const skills = stored.agent_skills || { skills: [] };
+
+    if (action === "list") {
+      const summaries = skills.skills.map((s) => ({
+        id: s.id,
+        frontmatter: s.frontmatter
+      }));
+      return { ok: true, data: { count: summaries.length, skills: summaries } };
+    }
+
+    if (action === "read") {
+      if (!args.id) return { ok: false, error: "id is required for read." };
+      const skill = skills.skills.find((s) => s.id === args.id);
+      if (!skill) return { ok: false, error: `Skill "${args.id}" not found.` };
+      return { ok: true, data: skill };
+    }
+
+    if (action === "write") {
+      const name = args.name || "untitled";
+      const description = args.description || "";
+      const tags = args.tags || [];
+      const content = args.content || "";
+
+      const frontmatter = { name, description, tags };
+      const fullContent = buildFrontMatter(frontmatter, content);
+
+      if (args.id) {
+        // Update existing
+        const idx = skills.skills.findIndex((s) => s.id === args.id);
+        if (idx === -1) return { ok: false, error: `Skill "${args.id}" not found.` };
+        skills.skills[idx].frontmatter = frontmatter;
+        skills.skills[idx].content = content;
+        skills.skills[idx].fullContent = fullContent;
+      } else {
+        // Create new
+        const id = `skill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        skills.skills.push({
+          id,
+          frontmatter,
+          content,
+          fullContent
+        });
+      }
+
+      await chrome.storage.local.set({ agent_skills: skills });
+      return { ok: true, data: { id: args.id || skills.skills[skills.skills.length - 1].id } };
+    }
+
+    if (action === "delete") {
+      if (!args.id) return { ok: false, error: "id is required for delete." };
+      const idx = skills.skills.findIndex((s) => s.id === args.id);
+      if (idx === -1) return { ok: false, error: `Skill "${args.id}" not found.` };
+      skills.skills.splice(idx, 1);
+      await chrome.storage.local.set({ agent_skills: skills });
+      return { ok: true, data: { deleted: args.id } };
+    }
+
+    return { ok: false, error: `Unknown skills action: ${action}. Use list, read, write, or delete.` };
+  } catch (err) {
+    return { ok: false, error: `Skills tool failed: ${err.message}` };
+  }
+}
+
+// --- Page Tools ---
 
 function tabsSendMessage(tabId, message) {
   return new Promise((resolve, reject) => {
@@ -342,7 +556,7 @@ async function clickTool(tabId, args) {
     if (after.status === "loading" || after.url !== beforeUrl) {
       return {
         ok: true,
-        data: {
+         {
           clicked: true,
           navigated: true,
           url: after.url,
@@ -374,11 +588,11 @@ async function screenshotTool(tabId, args) {
 
     return {
       ok: true,
-      data: {
+       {
         format,
         mime,
         note: "Screenshot captured from bound tab.",
-        _images: [`data:${mime};base64,${base64}`]
+        _images: [`${mime};base64,${base64}`]
       }
     };
   } catch (err) {
@@ -393,7 +607,7 @@ async function screenshotTool(tabId, args) {
 
         return {
           ok: true,
-          data: {
+           {
             format: fallbackFormat,
             mime: fallbackFormat === "png" ? "image/png" : "image/jpeg",
             note: "Screenshot captured via visible-tab fallback.",
@@ -490,8 +704,8 @@ async function fetchImagesBase64(images, args) {
       continue;
     }
 
-    if (image.src.startsWith("data:")) {
-      const match = image.src.match(/^data:(image\/[a-zA-Z0-9+.]+);base64,(.*)$/);
+    if (image.src.startsWith("")) {
+      const match = image.src.match(/^(image\/[a-zA-Z0-9+.]+);base64,(.*)$/);
       if (match && match[2].length <= Math.ceil((maxBytes * 4) / 3)) {
         dataUrls.push(image.src);
         out.push({ ...image, mime: match[1], included: true });
@@ -553,5 +767,5 @@ async function blobToDataUrl(blob) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
   }
 
-  return `data:${blob.type};base64,${btoa(binary)}`;
+  return `${blob.type};base64,${btoa(binary)}`;
 }

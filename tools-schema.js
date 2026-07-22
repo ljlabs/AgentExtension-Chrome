@@ -332,10 +332,104 @@
         },
         additionalProperties: false
       }
+    },
+    {
+      name: "read_browser_storage",
+      description: "Read keys from the extension's browser storage. Use this to retrieve notes, configuration, or any data the agent has previously stored.",
+      parameters: {
+        type: "object",
+        properties: {
+          keys: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of storage keys to read. If empty, returns all keys."
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "write_browser_storage",
+      description: "Write key-value pairs to the extension's browser storage. Use this to leave notes for yourself or persist state across conversations.",
+      parameters: {
+        type: "object",
+        properties: {
+          data: {
+            type: "object",
+            description: "Key-value pairs to store. Values can be strings, numbers, booleans, arrays, or objects.",
+            additionalProperties: true
+          }
+        },
+        required: ["data"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "memories",
+      description: "Manage agent memories — persistent markdown notes stored in browser storage. Use list/read/write/delete to maintain context across sessions.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["list", "read", "write", "delete"],
+            description: "Action to perform."
+          },
+          id: {
+            type: "string",
+            description: "Memory ID. Required for read and delete. For write, if omitted a new memory is created; if provided, the existing memory is updated."
+          },
+          title: {
+            type: "string",
+            description: "Title of the memory (used when writing)."
+          },
+          content: {
+            type: "string",
+            description: "Markdown content of the memory (used when writing)."
+          }
+        },
+        required: ["action"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "skills",
+      description: "Manage agent skills — reusable knowledge articles stored with YAML front matter (name, description, tags) followed by a markdown body. List returns only metadata. Read returns full content. Write creates or updates a skill.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["list", "read", "write", "delete"],
+            description: "Action to perform."
+          },
+          id: {
+            type: "string",
+            description: "Skill ID. Required for read and delete. For write, if omitted a new skill is created; if provided, the existing skill is updated."
+          },
+          name: {
+            type: "string",
+            description: "Short name for the skill (used when writing)."
+          },
+          description: {
+            type: "string",
+            description: "One-line description of what this skill covers (used when writing)."
+          },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description: "Tags for categorization (used when writing)."
+          },
+          content: {
+            type: "string",
+            description: "Markdown body of the skill (used when writing)."
+          }
+        },
+        required: ["action"],
+        additionalProperties: false
+      }
     }
   ];
-
-  const AGENT_TOOL_MAP = Object.fromEntries(AGENT_TOOLS.map((tool) => [tool.name, tool]));
 
   function getOpenAiTools() {
     return AGENT_TOOLS.map((tool) => ({

@@ -25,7 +25,6 @@ const DEFAULT_SETTINGS = {
   maxToolResultChars: 20000,
   requestTimeoutMs: 120000,
   toolTimeoutMs: 60000,
-  autoAttachHtml: true,
   modelSupportsVision: true,
   autoAllowLocalhostNetwork: true,
   networkAllowlist: [],
@@ -33,6 +32,20 @@ const DEFAULT_SETTINGS = {
 };
 
 const TOOL_MAP = globalThis.AGENT_TOOL_MAP || {};
+
+// --- Dev console logging ---
+function devLog(label, ...args) {
+  console.log(`%c[Agent]%c ${label}`, "color:#888;font-weight:bold", "color:inherit", ...args);
+}
+function devGroup(label) {
+  console.group(`%c[Agent]%c ${label}`, "color:#888;font-weight:bold", "color:inherit");
+}
+function devGroupEnd() {
+  console.groupEnd();
+}
+function devWarn(label, ...args) {
+  console.warn(`%c[Agent]%c ${label}`, "color:#f80;font-weight:bold", "color:inherit", ...args);
+}
 
 const state = {
   boundTabId: null,
@@ -164,7 +177,6 @@ function cacheDom() {
   dom.chatLog = document.getElementById("chatLog");
   dom.statusBar = document.getElementById("statusBar");
   dom.userInput = document.getElementById("userInput");
-  dom.attachHtmlToggle = document.getElementById("attachHtmlToggle");
   dom.sendBtn = document.getElementById("sendBtn");
   dom.stopBtn = document.getElementById("stopBtn");
 
@@ -177,7 +189,6 @@ function cacheDom() {
   dom.temperatureInput = document.getElementById("temperatureInput");
   dom.maxTokensInput = document.getElementById("maxTokensInput");
   dom.maxToolStepsInput = document.getElementById("maxToolStepsInput");
-  dom.maxHtmlCharsInput = document.getElementById("maxHtmlCharsInput");
   dom.maxToolResultCharsInput = document.getElementById("maxToolResultCharsInput");
   dom.requestTimeoutInput = document.getElementById("requestTimeoutInput");
   dom.toolTimeoutInput = document.getElementById("toolTimeoutInput");
@@ -209,11 +220,6 @@ function attachListeners() {
       event.preventDefault();
       onSend();
     }
-  });
-
-  dom.attachHtmlToggle.addEventListener("change", async () => {
-    settings.autoAttachHtml = dom.attachHtmlToggle.checked;
-    await chrome.storage.local.set({ settings });
   });
 
   dom.modelSelect.addEventListener("change", async () => {
@@ -281,7 +287,6 @@ function normalizeSettings(input) {
     maxToolResultChars: Number.parseInt(input.maxToolResultChars, 10),
     requestTimeoutMs: Number.parseInt(input.requestTimeoutMs, 10),
     toolTimeoutMs: Number.parseInt(input.toolTimeoutMs, 10),
-    autoAttachHtml: Boolean(input.autoAttachHtml),
     modelSupportsVision: Boolean(input.modelSupportsVision),
     autoAllowLocalhostNetwork: Boolean(input.autoAllowLocalhostNetwork),
     networkAllowlist,
@@ -297,7 +302,6 @@ function applySettingsToForm() {
   dom.temperatureInput.value = settings.temperature;
   dom.maxTokensInput.value = settings.maxTokens;
   dom.maxToolStepsInput.value = settings.maxToolSteps;
-  dom.maxHtmlCharsInput.value = settings.maxHtmlChars;
   dom.maxToolResultCharsInput.value = settings.maxToolResultChars;
   dom.requestTimeoutInput.value = settings.requestTimeoutMs;
   dom.toolTimeoutInput.value = settings.toolTimeoutMs;
@@ -305,8 +309,6 @@ function applySettingsToForm() {
   dom.autoLocalhostToggle.checked = settings.autoAllowLocalhostNetwork;
   dom.networkAllowlistInput.value = (settings.networkAllowlist || []).join("\n");
   dom.systemPromptInput.value = settings.systemPrompt;
-  dom.attachHtmlToggle.checked = settings.autoAttachHtml;
-
   populateModelSelect(state.models);
 }
 
@@ -324,7 +326,6 @@ async function saveSettings() {
     maxToolResultChars: dom.maxToolResultCharsInput.value,
     requestTimeoutMs: dom.requestTimeoutInput.value,
     toolTimeoutMs: dom.toolTimeoutInput.value,
-    autoAttachHtml: dom.attachHtmlToggle.checked,
     modelSupportsVision: dom.modelVisionToggle.checked,
     autoAllowLocalhostNetwork: dom.autoLocalhostToggle.checked,
     networkAllowlist: dom.networkAllowlistInput.value,
@@ -590,8 +591,10 @@ async function onSend() {
     content: text
   });
 
+  devLog("User message:", text);
+
   await saveTabState(state.boundTabId);
-  await runAgent({ attachHtml: dom.attachHtmlToggle.checked });
+  await runAgent();
 }
 
 function onStop() {
@@ -622,7 +625,7 @@ function onClear() {
   addSystem("Chat cleared.");
 }
 
-async function runAgent({ attachHtml = false } = {}) {
+async function runAgent() {
   if (state.isRunning) return;
 
   setRunning(true);
@@ -634,13 +637,16 @@ async function runAgent({ attachHtml = false } = {}) {
   let apiMessages;
 
   try {
-    apiMessages = await buildInitialApiMessages(attachHtml);
+    apiMessages = buildInitialApiMessages();
 
     while (step < settings.maxToolSteps) {
       if (state.stopped) break;
 
       step += 1;
       setStatus(`Step ${step}: calling model...`);
+
+      devGroup(`Step ${step}`);
+      devLog("Messages sent to model:", apiMessages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content.slice(0, 200) : "[array]" })));
 
       let response;
 
@@ -661,6 +667,8 @@ async function runAgent({ attachHtml = false } = {}) {
       }
 
       const parsed = parseAssistantResponse(response);
+
+      devLog("Model response:", { content: (parsed.content || "").slice(0, 300), toolCalls: (parsed.tool_calls || []).length });
 
       const assistantMessage = {
         role: "assistant",
@@ -686,6 +694,7 @@ async function runAgent({ attachHtml = false } = {}) {
           if (state.stopped) break;
 
           setStatus(`Step ${step}: running ${validation.name}...`);
+          devLog(`Tool call: ${validation.name}`, validation.args);
 
           let result;
 
@@ -702,6 +711,8 @@ async function runAgent({ attachHtml = false } = {}) {
           } else {
             result = await executeToolWithPermissions(validation.name, validation.args || {});
           }
+
+          devLog(`Tool result: ${validation.name}`, { ok: result?.ok,  result?.data ? JSON.stringify(result.data).slice(0, 300) : result?.error });
 
           const imagePayloads = extractImages(result);
 
@@ -763,9 +774,11 @@ async function runAgent({ attachHtml = false } = {}) {
 
         if (!state.stopped) {
           state.messages.push(...stepMessages);
+          devGroupEnd();
           continue;
         }
 
+        devGroupEnd();
         break;
       }
 
@@ -791,11 +804,15 @@ async function runAgent({ attachHtml = false } = {}) {
         state.messages.push(...stepMessages);
 
         addSystem("Sent parse errors back to the model.");
+        devGroupEnd();
         continue;
       }
 
       finalAnswer = parsed.content || "(empty response)";
       assistantMessage.content = finalAnswer;
+
+      devLog("Final answer:", finalAnswer.slice(0, 500));
+      devGroupEnd();
 
       addAssistantMessage(finalAnswer, []);
       state.messages.push(assistantMessage);
@@ -819,14 +836,8 @@ async function runAgent({ attachHtml = false } = {}) {
   }
 }
 
-async function buildInitialApiMessages(attachHtml) {
-  const messages = [buildSystemMessage()];
-
-  if (attachHtml) {
-    messages.push(await buildHtmlContextMessage());
-  }
-
-  return messages.concat(state.messages);
+function buildInitialApiMessages() {
+  return [buildSystemMessage()].concat(state.messages);
 }
 
 function buildSystemMessage() {
@@ -843,31 +854,6 @@ function buildSystemMessage() {
       `Bound tab ID: ${state.boundTabId || "unknown"}\n` +
       `Current time: ${new Date().toISOString()}\n\n` +
       `Important: stay attached to this bound tab. Do not request tab switches.`
-  };
-}
-
-async function buildHtmlContextMessage() {
-  const result = await executePrivilegedTool("get_html", {
-    maxLength: settings.maxHtmlChars,
-    includeScripts: false,
-    includeStyles: false,
-    includeComments: false
-  });
-
-  if (!result.ok) {
-    return {
-      role: "system",
-      content: `Failed to read bound page HTML: ${result.error}`
-    };
-  }
-
-  const html = result.data?.html || "";
-
-  return {
-    role: "system",
-    content:
-      `Current bound page HTML, truncated to ${settings.maxHtmlChars} characters:\n\n` +
-      truncate(html, settings.maxHtmlChars)
   };
 }
 
@@ -1381,7 +1367,11 @@ function addAssistantMessage(text, validations = []) {
   const body = createMessage("assistant", "Agent");
 
   if (text) {
-    addParagraph(body, text);
+    if (typeof renderMarkdown === "function") {
+      body.appendChild(renderMarkdown(text));
+    } else {
+      addParagraph(body, text);
+    }
   }
 
   if (validations.length) {
