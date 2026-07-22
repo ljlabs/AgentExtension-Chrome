@@ -49,6 +49,89 @@ const state = {
   activePermission: null
 };
 
+// --- Per-tab state persistence ---
+const tabStates = {};
+
+function getTabStateKey(tabId) {
+  return `chat_${tabId}`;
+}
+
+async function saveTabState(tabId) {
+  if (!tabId) return;
+  try {
+    await chrome.storage.session.set({
+      [getTabStateKey(tabId)]: {
+        messages: state.messages,
+        imagePermission: state.imagePermission
+      }
+    });
+  } catch {
+    // storage full or unavailable — silently drop
+  }
+}
+
+async function loadTabState(tabId) {
+  if (!tabId) return;
+  try {
+    const key = getTabStateKey(tabId);
+    const stored = await chrome.storage.session.get(key);
+    if (stored[key]) {
+      state.messages = stored[key].messages || [];
+      state.imagePermission = stored[key].imagePermission || "prompt";
+    } else {
+      state.messages = [];
+      state.imagePermission = "prompt";
+    }
+    state.sessionAllowedNetworkOrigins.clear();
+    state.sessionDeniedNetworkOrigins.clear();
+    state.visionFailed = false;
+  } catch {
+    state.messages = [];
+    state.imagePermission = "prompt";
+  }
+}
+
+function renderChatLog() {
+  dom.chatLog.innerHTML = "";
+
+  for (const msg of state.messages) {
+    if (msg.role === "user") {
+      addUserMessage(msg.content);
+    } else if (msg.role === "assistant") {
+      addAssistantMessage(msg.content || "", []);
+    } else if (msg.role === "system") {
+      addSystem(msg.content);
+    } else if (msg.role === "tool") {
+      // Tool results — show as tool chip only
+      const body = createMessage("tool", "Tool Result");
+      addParagraph(body, truncate(msg.content || "", 500));
+    }
+  }
+
+  scrollToBottom();
+}
+
+function renderStatusPill() {
+  const pill = document.getElementById("statusPill");
+  if (!pill) return;
+
+  if (!state.boundTabId || !state.boundTab) {
+    pill.textContent = "NO TAB";
+    pill.title = "No tab bound";
+    pill.className = "status-pill status-pill--none";
+    return;
+  }
+
+  const url = state.boundTab.url || "";
+  const hostname = (() => {
+    try { return new URL(url).hostname; } catch { return "unknown"; }
+  })();
+
+  pill.textContent = hostname || "unknown";
+  pill.title = `${state.boundTab.title || "Untitled"}\n${url}\nTab #${state.boundTab.id}`;
+  pill.className = "status-pill status-pill--active";
+}
+
 let settings = { ...DEFAULT_SETTINGS };
 
 const dom = {};
@@ -64,6 +147,8 @@ async function init() {
 
   await bindInitialTab();
   await refreshBoundTabInfo();
+  renderChatLog();
+  renderStatusPill();
 
   await loadModels();
 
@@ -160,6 +245,12 @@ function attachListeners() {
       addSystem("Bound tab closed. Click Rebind to attach to another tab.");
     }
   });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.type === "tabActivated") {
+      handleTabActivated(message.tabId).catch(() => {});
+    }
+  });
 }
 
 async function loadSettings() {
@@ -254,6 +345,7 @@ async function bindInitialTab() {
     if (pending && pending.pendingBindTabId) {
       state.boundTabId = pending.pendingBindTabId;
       await chrome.storage.session.remove("pendingBindTabId");
+      await loadTabState(state.boundTabId);
       return;
     }
   } catch {
@@ -261,6 +353,7 @@ async function bindInitialTab() {
   }
 
   state.boundTabId = await getActiveTabIdInLastNormalWindow();
+  await loadTabState(state.boundTabId);
 }
 
 async function getActiveTabIdInLastNormalWindow() {
@@ -275,8 +368,18 @@ async function getActiveTabIdInLastNormalWindow() {
 }
 
 async function onRebind() {
+  const oldTabId = state.boundTabId;
+
   state.boundTabId = await getActiveTabIdInLastNormalWindow();
+
+  if (state.boundTabId !== oldTabId) {
+    await saveTabState(oldTabId);
+    await loadTabState(state.boundTabId);
+    renderChatLog();
+  }
+
   await refreshBoundTabInfo();
+  renderStatusPill();
   await ensureBoundContentScript();
 
   if (state.boundTabId) {
@@ -286,10 +389,30 @@ async function onRebind() {
   }
 }
 
+async function handleTabActivated(newTabId) {
+  if (state.isRunning) return;
+
+  if (newTabId === state.boundTabId) return;
+
+  await saveTabState(state.boundTabId);
+
+  state.boundTabId = newTabId;
+
+  await loadTabState(newTabId);
+  await refreshBoundTabInfo();
+  renderStatusPill();
+  renderChatLog();
+
+  if (state.messages.length === 0) {
+    addSystem("Switched to new tab. Start a fresh conversation here.");
+  }
+}
+
 async function refreshBoundTabInfo() {
   if (!state.boundTabId) {
     state.boundTab = null;
     dom.tabInfo.textContent = "No bound tab";
+    renderStatusPill();
     return;
   }
 
@@ -300,10 +423,12 @@ async function refreshBoundTabInfo() {
     const label = tab.title || tab.url || `Tab ${tab.id}`;
     dom.tabInfo.textContent = `${truncate(label, 60)} (#${tab.id})`;
     dom.tabInfo.title = `${tab.url || ""}\nTab ID: ${tab.id}`;
+    renderStatusPill();
   } catch {
     state.boundTabId = null;
     state.boundTab = null;
     dom.tabInfo.textContent = "Bound tab closed";
+    renderStatusPill();
   }
 }
 
@@ -465,6 +590,7 @@ async function onSend() {
     content: text
   });
 
+  await saveTabState(state.boundTabId);
   await runAgent({ attachHtml: dom.attachHtmlToggle.checked });
 }
 
@@ -492,6 +618,7 @@ function onClear() {
   state.visionFailed = false;
   dom.chatLog.innerHTML = "";
 
+  saveTabState(state.boundTabId);
   addSystem("Chat cleared.");
 }
 
@@ -688,6 +815,7 @@ async function runAgent({ attachHtml = false } = {}) {
   } finally {
     setRunning(false);
     setStatus("");
+    saveTabState(state.boundTabId).catch(() => {});
   }
 }
 

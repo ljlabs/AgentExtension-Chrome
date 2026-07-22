@@ -35,6 +35,20 @@ async function configureSidePanel() {
 chrome.runtime.onInstalled.addListener(configureSidePanel);
 chrome.runtime.onStartup.addListener(configureSidePanel);
 
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    chrome.runtime.sendMessage({
+      type: "tabActivated",
+      tabId: activeInfo.tabId,
+      url: tab.url || "",
+      title: tab.title || ""
+    }).catch(() => {});
+  } catch (err) {
+    console.error("onActivated error", err);
+  }
+});
+
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab || !tab.id) return;
 

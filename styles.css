@@ -56,6 +56,64 @@ body {
   border-bottom: 4px solid var(--ink);
 }
 
+.header-center {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 3px solid var(--ink);
+  box-shadow: var(--shadow);
+  font-weight: 900;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+
+.status-pill::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--ink);
+  flex-shrink: 0;
+}
+
+.status-pill--active {
+  background: var(--green);
+}
+
+.status-pill--active::before {
+  background: var(--ink);
+}
+
+.status-pill--none {
+  background: var(--danger);
+  opacity: 0.7;
+}
+
+.status-pill--none::before {
+  background: var(--danger);
+  border-color: var(--ink);
+}
+
+.status-pill:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 6px 6px 0 0 var(--ink);
+}
+
 .brand {
   font-size: 18px;
   font-weight: 900;
@@ -69,11 +127,12 @@ body {
 
 .tab-info {
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 10px;
   background: var(--card);
   border: 3px solid var(--ink);
   box-shadow: var(--shadow);
   font-weight: 700;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -167,10 +226,26 @@ body {
   background: #fff;
   font: inherit;
   font-weight: 600;
+  transition: box-shadow 80ms ease, transform 80ms ease;
 }
 
-.settings textarea,
+.settings input[type="text"]:focus,
+.settings input[type="password"]:focus,
+.settings input[type="number"]:focus,
+.settings select:focus,
+.settings textarea:focus,
+.composer textarea:focus {
+  outline: none;
+  box-shadow: inset 3px 3px 0 rgba(17, 17, 17, 0.08), 0 0 0 3px var(--ink);
+  transform: translate(-1px, -1px);
+}
+
+.settings textarea {
+  resize: vertical;
+}
+
 .composer textarea {
+  min-height: 72px;
   resize: vertical;
 }
 
@@ -201,12 +276,25 @@ body {
   box-shadow: var(--shadow);
   font-weight: 800;
   margin: 0;
+  cursor: pointer;
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+
+.toggle:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 6px 6px 0 0 var(--ink);
+}
+
+.toggle:active {
+  transform: translate(5px, 5px);
+  box-shadow: none;
 }
 
 .toggle input {
   width: 18px;
   height: 18px;
   accent-color: #111;
+  cursor: pointer;
 }
 
 .chat-log {
@@ -223,6 +311,12 @@ body {
   box-shadow: var(--shadow-lg);
   background: var(--card);
   padding: 10px;
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+
+.message:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 9px 9px 0 0 var(--ink);
 }
 
 .message-title {
@@ -317,6 +411,9 @@ pre {
   box-shadow: var(--shadow);
   background: var(--orange);
   font-weight: 900;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .composer {
