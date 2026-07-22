@@ -1,2 +1,4 @@
 node_modules
 .env
+dist/
+editor/node_modules/

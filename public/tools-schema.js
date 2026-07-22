@@ -428,6 +428,34 @@
         required: ["action"],
         additionalProperties: false
       }
+    },
+    {
+      name: "rules",
+      description: "Manage agent rules — persistent markdown notes stored in browser storage. Use list/read/write/delete to maintain behavioral rules across sessions.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["list", "read", "write", "delete"],
+            description: "Action to perform."
+          },
+          id: {
+            type: "string",
+            description: "Rule ID. Required for read and delete. For write, if omitted a new rule is created; if provided, the existing rule is updated."
+          },
+          title: {
+            type: "string",
+            description: "Title of the rule (used when writing)."
+          },
+          content: {
+            type: "string",
+            description: "Markdown content of the rule (used when writing)."
+          }
+        },
+        required: ["action"],
+        additionalProperties: false
+      }
     }
   ];
 

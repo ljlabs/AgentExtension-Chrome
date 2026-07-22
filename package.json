@@ -1,27 +1,31 @@
 {
-  "name": "agentextension-chrome",
+  "name": "agent-extension-chrome",
+  "private": true,
   "version": "1.0.0",
-  "description": "Chrome Manifest V3 extension that adds a neobrutalist pastel chat side panel. It connects to a local OpenAI-compatible LLM server, sends page HTML when enabled, validates tool calls, returns validation errors to the model, asks permission before sending images, and can interact with the bound tab.",
-  "main": "background.js",
-  "directories": {
-    "test": "test"
-  },
+  "type": "module",
+  "description": "Chrome browser agent with neobrutalist side panel, tool validation, and an editor add-on for managing skills, memories, and rules.",
   "scripts": {
-    "test": "node test/unit-tests.mjs"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:extension": "echo 'Extension files are in public/ — load this directory in Chrome'",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ljlabs/AgentExtension-Chrome.git"
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "monaco-editor": "^0.52.0",
+    "@monaco-editor/react": "^4.6.0"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/ljlabs/AgentExtension-Chrome/issues"
-  },
-  "homepage": "https://github.com/ljlabs/AgentExtension-Chrome#readme",
   "devDependencies": {
-    "dotenv": "^17.4.2"
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.8"
   }
 }

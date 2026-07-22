@@ -171,6 +171,7 @@ async function init() {
 
 function cacheDom() {
   dom.tabInfo = document.getElementById("tabInfo");
+  dom.editBtn = document.getElementById("editBtn");
   dom.rebindBtn = document.getElementById("rebindBtn");
   dom.settingsBtn = document.getElementById("settingsBtn");
   dom.clearBtn = document.getElementById("clearBtn");
@@ -213,6 +214,9 @@ function attachListeners() {
   dom.clearBtn.addEventListener("click", onClear);
   dom.settingsBtn.addEventListener("click", () => dom.settingsDrawer.classList.toggle("hidden"));
   dom.rebindBtn.addEventListener("click", onRebind);
+  dom.editBtn.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "openEditor" });
+  });
   dom.refreshModelsBtn.addEventListener("click", loadModels);
   dom.saveSettingsBtn.addEventListener("click", saveSettings);
 

@@ -103,6 +103,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      if (message.type === "openEditor") {
+        await chrome.tabs.create({
+          url: chrome.runtime.getURL("editor.html")
+        });
+        sendResponse({ ok: true });
+        return;
+      }
+
       sendResponse({ ok: false, error: `Unknown message type: ${message.type}` });
     } catch (err) {
       sendResponse({ ok: false, error: err.message || String(err) });
@@ -149,6 +157,10 @@ async function handleExecuteTool(message) {
 
   if (tool === "skills") {
     return await handleSkills(args);
+  }
+
+  if (tool === "rules") {
+    return await handleRules(args);
   }
 
   if (!tabId) {
@@ -379,6 +391,72 @@ async function handleSkills(args) {
     return { ok: false, error: `Unknown skills action: ${action}. Use list, read, write, or delete.` };
   } catch (err) {
     return { ok: false, error: `Skills tool failed: ${err.message}` };
+  }
+}
+
+// --- Rules Tool ---
+
+async function handleRules(args) {
+  const action = args.action;
+
+  try {
+    const stored = await chrome.storage.local.get("agent_rules");
+    const rules = stored.agent_rules || { rules: [] };
+
+    if (action === "list") {
+      const summaries = rules.rules.map((r) => ({
+        id: r.id,
+        title: r.title,
+        created: r.created,
+        updated: r.updated
+      }));
+      return { ok: true, data: { count: summaries.length, rules: summaries } };
+    }
+
+    if (action === "read") {
+      if (!args.id) return { ok: false, error: "id is required for read." };
+      const rule = rules.rules.find((r) => r.id === args.id);
+      if (!rule) return { ok: false, error: `Rule "${args.id}" not found.` };
+      return { ok: true, data: rule };
+    }
+
+    if (action === "write") {
+      const title = args.title || "Untitled";
+      const content = args.content || "";
+
+      if (args.id) {
+        const idx = rules.rules.findIndex((r) => r.id === args.id);
+        if (idx === -1) return { ok: false, error: `Rule "${args.id}" not found.` };
+        rules.rules[idx].title = title;
+        rules.rules[idx].content = content;
+        rules.rules[idx].updated = new Date().toISOString();
+      } else {
+        const id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        rules.rules.push({
+          id,
+          title,
+          content,
+          created: new Date().toISOString(),
+          updated: new Date().toISOString()
+        });
+      }
+
+      await chrome.storage.local.set({ agent_rules: rules });
+      return { ok: true, data: { id: args.id || rules.rules[rules.rules.length - 1].id } };
+    }
+
+    if (action === "delete") {
+      if (!args.id) return { ok: false, error: "id is required for delete." };
+      const idx = rules.rules.findIndex((r) => r.id === args.id);
+      if (idx === -1) return { ok: false, error: `Rule "${args.id}" not found.` };
+      rules.rules.splice(idx, 1);
+      await chrome.storage.local.set({ agent_rules: rules });
+      return { ok: true, data: { deleted: args.id } };
+    }
+
+    return { ok: false, error: `Unknown rules action: ${action}. Use list, read, write, or delete.` };
+  } catch (err) {
+    return { ok: false, error: `Rules tool failed: ${err.message}` };
   }
 }
 
