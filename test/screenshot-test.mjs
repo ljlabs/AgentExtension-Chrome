@@ -1,21 +1,21 @@
 /**
- * Focused unit tests for the screenshot tool image pipeline.
- *
- * Validates:
- * - Debugger capture returning raw base64 → complete data URL with "data:" prefix
- * - PNG, JPEG, and WebP MIME types
- * - Visible-tab fallback path
- * - Final generated OpenAI message content structure
- * - Malformed/empty capture output
- * - extractImages / image message building end-to-end
- *
- * Run: node test/screenshot-test.mjs
+ * Screenshot tool tests — imports the real functions from background.js
+ * by evaluating it inside a vm sandbox with mocked chrome.* globals.
  */
 
-import { describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+import { buildChromeMock, sidepanelHelpers } from "./test-helpers.mjs";
+
+const { extractImages, buildImageMessage, buildToolMessage } = sidepanelHelpers;
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, "..");
 
 const MIME_MAP = {
   png: "image/png",
@@ -23,240 +23,56 @@ const MIME_MAP = {
   webp: "image/webp"
 };
 
-function clampInt(value, min, max, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
-
 /**
- * Build a minimal Chrome-like mock for testing screenshotTool logic.
- * captureData simulates what the CDP Page.captureScreenshot API returns
- * in its result.data field (raw base64, not a data URL).
+ * Evaluate background.js inside a vm sandbox with the given chrome mock.
+ * Returns the sandbox (with real screenshotTool, etc.) and the chrome object
+ * so callers can mutate it mid-test.
  */
-function buildChromeMock(overrides = {}) {
-  const runtime = { lastError: null };
-  const debuggerFail = overrides.debuggerFail || false;
-  const debuggerErrorMsg = overrides.debuggerErrorMsg || "Cannot attach";
+function loadBackground(overrides = {}) {
+  const chrome = buildChromeMock(overrides);
 
-  return {
-    runtime,
-    debugger: {
-      attach: mock.fn((_target, _version, cb) => {
-        if (debuggerFail) {
-          runtime.lastError = { message: debuggerErrorMsg };
-        }
-        if (cb) cb();
-      }),
-      sendCommand: mock.fn((_target, method, _params, cb) => {
-        if (debuggerFail) {
-          runtime.lastError = { message: debuggerErrorMsg };
-          if (cb) cb(undefined);
-          return {};
-        }
-        if (method === "Page.captureScreenshot") {
-          // The CDP API returns { data: "<raw base64>" }
-          const result = { data: overrides.captureData ?? "AAAA" };
-          if (cb) cb(result);
-          return result;
-        }
-        if (cb) cb({});
-        return {};
-      }),
-      detach: mock.fn((_target, cb) => {
-        if (cb) cb();
-      })
-    },
-    tabs: {
-      get: mock.fn(async () => ({
-        id: overrides.tabId || 1,
-        active: overrides.tabActive !== undefined ? overrides.tabActive : true,
-        windowId: overrides.windowId || 1,
-        url: "https://example.com",
-        title: "Test"
-      })),
-      captureVisibleTab: mock.fn(async () =>
-        overrides.visibleTabDataUrl || "data:image/jpeg;base64,VISIBLE"
-      )
-    }
-  };
+  const sandbox = vm.createContext({
+    chrome,
+    importScripts: () => {},
+    console,
+    fetch,
+    setTimeout,
+    clearTimeout,
+    URL,
+    AbortController,
+    Blob: globalThis.Blob,
+    TextEncoder: globalThis.TextEncoder,
+    TextDecoder: globalThis.TextDecoder,
+    btoa: globalThis.btoa,
+    atob: globalThis.atob,
+    JSON,
+    Math,
+    Date,
+    Number,
+    String,
+    Array,
+    Object,
+    Error,
+    TypeError,
+    Promise,
+    RegExp,
+    parseInt: globalThis.parseInt,
+    isNaN: globalThis.isNaN,
+    isFinite: globalThis.isFinite
+  });
+
+  const code = readFileSync(resolve(ROOT, "background.js"), "utf-8");
+  vm.runInContext(code, sandbox);
+
+  return { sandbox, chrome };
 }
 
-/**
- * Replicate screenshotTool + captureScreenshotWithDebugger from background.js.
- * This matches the FIXED version with:
- *   _images: [`data:${mime};base64,${base64}`]
- * and the fallback returning the dataUrl directly.
- */
-async function screenshotToolLogic(chrome, tabId, args) {
-  if (!tabId) {
-    return { ok: false, error: "No bound tab." };
-  }
-
-  const format = ["png", "jpeg", "webp"].includes(args.format) ? args.format : "jpeg";
-  const quality = clampInt(args.quality, 1, 100, 70);
-
-  async function captureScreenshotWithDebugger(tabId, format, quality) {
-    const target = { tabId };
-    let attachedByUs = false;
-
-    try {
-      await new Promise((resolve, reject) => {
-        chrome.debugger.attach(target, "1.3", () => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else {
-            resolve();
-          }
-        });
-      });
-      attachedByUs = true;
-    } catch (err) {
-      if (!/Another debugger is already attached/i.test(err.message)) {
-        throw err;
-      }
-    }
-
-    try {
-      await new Promise((resolve, reject) => {
-        chrome.debugger.sendCommand(target, "Page.enable", {}, () => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else {
-            resolve();
-          }
-        });
-      });
-
-      const params = { format, captureBeyondViewport: true };
-      if (format !== "png") params.quality = quality;
-
-      const result = await new Promise((resolve, reject) => {
-        chrome.debugger.sendCommand(target, "Page.captureScreenshot", params, (res) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else {
-            resolve(res);
-          }
-        });
-      });
-      return result.data;
-    } finally {
-      if (attachedByUs) {
-        await new Promise((resolve) => {
-          chrome.debugger.detach(target, () => resolve());
-        });
-      }
-    }
-  }
-
-  try {
-    const base64 = await captureScreenshotWithDebugger(tabId, format, quality);
-    const mime = format === "png" ? "image/png" : format === "webp" ? "image/webp" : "image/jpeg";
-
-    return {
-      ok: true,
-      data: {
-        format,
-        mime,
-        note: "Screenshot captured from bound tab.",
-        _images: [`data:${mime};base64,${base64}`]
-      }
-    };
-  } catch (err) {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab.active) {
-        const fallbackFormat = format === "png" ? "png" : "jpeg";
-        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-          format: fallbackFormat,
-          quality: fallbackFormat === "png" ? undefined : quality
-        });
-
-        return {
-          ok: true,
-          data: {
-            format: fallbackFormat,
-            mime: fallbackFormat === "png" ? "image/png" : "image/jpeg",
-            note: "Screenshot captured via visible-tab fallback.",
-            _images: [dataUrl]
-          }
-        };
-      }
-    } catch {
-      // ignore fallback failure
-    }
-
-    return {
-      ok: false,
-      error: `Screenshot failed: ${err.message}. The debugger permission may be denied, or the tab cannot be captured.`
-    };
-  }
-}
-
-// ─── Shared sidepanel logic (replicated for isolation) ──────────────────────
-
-/**
- * Matches sidepanel.js extractImages — reads _images from result.data,
- * then from result root, deletes both after extraction.
- */
-function extractImages(result) {
-  const images = [];
-
-  if (result && result.data && Array.isArray(result.data._images)) {
-    images.push(...result.data._images);
-    delete result.data._images;
-  }
-
-  if (result && Array.isArray(result._images)) {
-    images.push(...result._images);
-    delete result._images;
-  }
-
-  return images;
-}
-
-/**
- * Matches the sidepanel.js image message builder (line ~739).
- * When vision is enabled and images are present, a user message is created
- * with content array: [{ type: "text", text: ... }, { type: "image_url", image_url: { url } }]
- */
-function buildImageMessage(imagePayloads, toolCallId) {
-  if (imagePayloads.length) {
-    return {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: `Images for tool call ${toolCallId}:`
-        },
-        ...imagePayloads.map((url) => ({
-          type: "image_url",
-          image_url: { url }
-        }))
-      ]
-    };
-  }
-  return null;
-}
-
-/**
- * Matches the sidepanel.js tool message builder (line ~728).
- */
-function buildToolMessage(toolCallId, result) {
-  return {
-    role: "tool",
-    tool_call_id: toolCallId,
-    content: JSON.stringify(result)
-  };
-}
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
+// ─── Tests ────────────────────────────────────────────────────────────────
 
 describe("screenshotTool — debugger capture returning raw base64", () => {
   it("JPEG: raw base64 produces complete data URL with data: prefix", async () => {
-    const chrome = buildChromeMock({ captureData: "AAAA" });
-    const result = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const { sandbox } = loadBackground({ captureData: "AAAA" });
+    const result = await sandbox.screenshotTool(1, { format: "jpeg" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data.format, "jpeg");
@@ -268,8 +84,8 @@ describe("screenshotTool — debugger capture returning raw base64", () => {
   });
 
   it("PNG: raw base64 produces correct MIME", async () => {
-    const chrome = buildChromeMock({ captureData: "iVBORw0KGgo" });
-    const result = await screenshotToolLogic(chrome, 1, { format: "png" });
+    const { sandbox } = loadBackground({ captureData: "iVBORw0KGgo" });
+    const result = await sandbox.screenshotTool(1, { format: "png" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data.format, "png");
@@ -278,8 +94,8 @@ describe("screenshotTool — debugger capture returning raw base64", () => {
   });
 
   it("WebP: raw base64 produces correct MIME", async () => {
-    const chrome = buildChromeMock({ captureData: "UklGRiQAAABX" });
-    const result = await screenshotToolLogic(chrome, 1, { format: "webp" });
+    const { sandbox } = loadBackground({ captureData: "UklGRiQAAABX" });
+    const result = await sandbox.screenshotTool(1, { format: "webp" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data.format, "webp");
@@ -291,8 +107,8 @@ describe("screenshotTool — debugger capture returning raw base64", () => {
 describe("screenshotTool — PNG, JPEG, WebP MIME types", () => {
   for (const format of ["png", "jpeg", "webp"]) {
     it(`${format} → correct MIME type in result`, async () => {
-      const chrome = buildChromeMock({ captureData: "dGVzdA==" });
-      const result = await screenshotToolLogic(chrome, 1, { format });
+      const { sandbox } = loadBackground({ captureData: "dGVzdA==" });
+      const result = await sandbox.screenshotTool(1, { format });
 
       assert.equal(result.ok, true);
       assert.equal(result.data.mime, MIME_MAP[format]);
@@ -301,8 +117,8 @@ describe("screenshotTool — PNG, JPEG, WebP MIME types", () => {
   }
 
   it("unknown format defaults to jpeg", async () => {
-    const chrome = buildChromeMock({ captureData: "dGVzdA==" });
-    const result = await screenshotToolLogic(chrome, 1, { format: "gif" });
+    const { sandbox } = loadBackground({ captureData: "dGVzdA==" });
+    const result = await sandbox.screenshotTool(1, { format: "gif" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data.format, "jpeg");
@@ -312,27 +128,27 @@ describe("screenshotTool — PNG, JPEG, WebP MIME types", () => {
 
 describe("screenshotTool — visible-tab fallback", () => {
   it("falls back to captureVisibleTab when debugger fails", async () => {
-    const chrome = buildChromeMock({
+    const { sandbox } = loadBackground({
       debuggerFail: true,
-      visibleTabDataUrl: "data:image/jpeg;base64,VISIBLE"
+      visibleTabDataUrl: "image/jpeg;base64,VISIBLE"
     });
 
-    const result = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const result = await sandbox.screenshotTool(1, { format: "jpeg" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data.format, "jpeg");
     assert.equal(result.data.mime, "image/jpeg");
     assert.ok(result.data.note.includes("fallback"));
-    assert.equal(result.data._images[0], "data:image/jpeg;base64,VISIBLE");
+    assert.equal(result.data._images[0], "image/jpeg;base64,VISIBLE");
   });
 
   it("falls back to PNG when format is png and debugger fails", async () => {
-    const chrome = buildChromeMock({
+    const { sandbox } = loadBackground({
       debuggerFail: true,
-      visibleTabDataUrl: "data:image/png;base64,VISIBLE"
+      visibleTabDataUrl: "image/png;base64,VISIBLE"
     });
 
-    const result = await screenshotToolLogic(chrome, 1, { format: "png" });
+    const result = await sandbox.screenshotTool(1, { format: "png" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data.format, "png");
@@ -341,27 +157,26 @@ describe("screenshotTool — visible-tab fallback", () => {
   });
 
   it("returns error when both debugger and fallback fail", async () => {
-    const chrome = buildChromeMock({ debuggerFail: true });
-    // Make fallback fail: tab is not active
-    chrome.tabs.get = mock.fn(async () => ({ active: false }));
+    const { sandbox, chrome } = loadBackground({ debuggerFail: true });
+    chrome.tabs.get = async () => ({ active: false });
 
-    const result = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const result = await sandbox.screenshotTool(1, { format: "jpeg" });
 
     assert.equal(result.ok, false);
     assert.ok(result.error.includes("Screenshot failed"));
   });
 
   it("returns error when tabId is null", async () => {
-    const chrome = buildChromeMock();
-    const result = await screenshotToolLogic(chrome, null, { format: "jpeg" });
+    const { sandbox } = loadBackground();
+    const result = await sandbox.screenshotTool(null, { format: "jpeg" });
 
     assert.equal(result.ok, false);
     assert.equal(result.error, "No bound tab.");
   });
 
   it("returns error when tabId is undefined", async () => {
-    const chrome = buildChromeMock();
-    const result = await screenshotToolLogic(chrome, undefined, { format: "jpeg" });
+    const { sandbox } = loadBackground();
+    const result = await sandbox.screenshotTool(undefined, { format: "jpeg" });
 
     assert.equal(result.ok, false);
     assert.equal(result.error, "No bound tab.");
@@ -376,13 +191,13 @@ describe("extractImages — screenshot result pipeline", () => {
         format: "jpeg",
         mime: "image/jpeg",
         note: "Screenshot captured from bound tab.",
-        _images: ["data:image/jpeg;base64,/9j/4AAQ"]
+        _images: ["image/jpeg;base64,/9j/4AAQ"]
       }
     };
 
     const images = extractImages(result);
 
-    assert.deepEqual(images, ["data:image/jpeg;base64,/9j/4AAQ"]);
+    assert.deepEqual(images, ["image/jpeg;base64,/9j/4AAQ"]);
     assert.equal(result.data._images, undefined, "_images should be deleted from result.data");
   });
 
@@ -392,8 +207,8 @@ describe("extractImages — screenshot result pipeline", () => {
       data: {
         images: [],
         _images: [
-          "data:image/png;base64,abc",
-          "data:image/jpeg;base64,def"
+          "image/png;base64,abc",
+          "image/jpeg;base64,def"
         ]
       }
     };
@@ -401,8 +216,8 @@ describe("extractImages — screenshot result pipeline", () => {
     const images = extractImages(result);
 
     assert.equal(images.length, 2);
-    assert.equal(images[0], "data:image/png;base64,abc");
-    assert.equal(images[1], "data:image/jpeg;base64,def");
+    assert.equal(images[0], "image/png;base64,abc");
+    assert.equal(images[1], "image/jpeg;base64,def");
   });
 
   it("returns empty when no _images present", () => {
@@ -422,31 +237,29 @@ describe("extractImages — screenshot result pipeline", () => {
 
 describe("OpenAI message content — image message building", () => {
   it("creates correct image_url content part from data URL", () => {
-    const imageUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+    const imageUrl = "image/jpeg;base64,/9j/4AAQSkZJRg==";
     const imageMessage = buildImageMessage([imageUrl], "call_screenshot_1");
 
     assert.equal(imageMessage.role, "user");
     assert.ok(Array.isArray(imageMessage.content));
     assert.equal(imageMessage.content.length, 2);
 
-    // Text part
     assert.equal(imageMessage.content[0].type, "text");
     assert.ok(imageMessage.content[0].text.includes("call_screenshot_1"));
 
-    // Image part
     assert.equal(imageMessage.content[1].type, "image_url");
     assert.deepEqual(imageMessage.content[1].image_url, { url: imageUrl });
   });
 
   it("creates multiple image_url parts for multiple images", () => {
     const urls = [
-      "data:image/png;base64,abc123",
-      "data:image/jpeg;base64,def456",
-      "data:image/webp;base64,ghi789"
+      "image/png;base64,abc123",
+      "image/jpeg;base64,def456",
+      "image/webp;base64,ghi789"
     ];
     const imageMessage = buildImageMessage(urls, "call_multi_1");
 
-    assert.equal(imageMessage.content.length, 4); // 1 text + 3 images
+    assert.equal(imageMessage.content.length, 4);
 
     for (let i = 0; i < 3; i++) {
       assert.equal(imageMessage.content[i + 1].type, "image_url");
@@ -485,44 +298,41 @@ describe("OpenAI message content — tool message with stringified result", () =
 
 describe("screenshotTool — malformed/empty capture output", () => {
   it("handles empty base64 string from debugger", async () => {
-    const chrome = buildChromeMock({ captureData: "" });
-    const result = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const { sandbox } = loadBackground({ captureData: "" });
+    const result = await sandbox.screenshotTool(1, { format: "jpeg" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data._images[0], "data:image/jpeg;base64,");
   });
 
   it("handles undefined data from debugger (empty result object)", async () => {
-    const chrome = buildChromeMock();
-    // Override to return {} instead of { data: ... }
-    chrome.debugger.sendCommand = mock.fn((_target, method, _params, cb) => {
+    const { sandbox, chrome } = loadBackground();
+    chrome.debugger.sendCommand = (target, method, params, cb) => {
       if (method === "Page.captureScreenshot") {
         if (cb) cb({});
         return {};
       }
       if (cb) cb({});
       return {};
-    });
+    };
 
-    const result = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const result = await sandbox.screenshotTool(1, { format: "jpeg" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data._images[0], "data:image/jpeg;base64,undefined");
   });
 
   it("handles null data from debugger (falls back to mock default via ??)", async () => {
-    const chrome = buildChromeMock({ captureData: null });
-    const result = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const { sandbox } = loadBackground({ captureData: null });
+    const result = await sandbox.screenshotTool(1, { format: "jpeg" });
 
-    // buildChromeMock uses `captureData ?? "AAAA"`, and `??` treats null as
-    // nullish, so passing null here yields the mock's default payload.
     assert.equal(result.ok, true);
     assert.equal(result.data._images[0], "data:image/jpeg;base64,AAAA");
   });
 
   it("preserves all metadata fields on success", async () => {
-    const chrome = buildChromeMock({ captureData: "AAAA" });
-    const result = await screenshotToolLogic(chrome, 1, { format: "png" });
+    const { sandbox } = loadBackground({ captureData: "AAAA" });
+    const result = await sandbox.screenshotTool(1, { format: "png" });
 
     assert.equal(result.ok, true);
     assert.equal(result.data.format, "png");
@@ -534,10 +344,10 @@ describe("screenshotTool — malformed/empty capture output", () => {
   });
 
   it("returns structured error on failure with message included", async () => {
-    const chrome = buildChromeMock({ debuggerFail: true });
-    chrome.tabs.get = mock.fn(async () => ({ active: false }));
+    const { sandbox, chrome } = loadBackground({ debuggerFail: true });
+    chrome.tabs.get = async () => ({ active: false });
 
-    const result = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const result = await sandbox.screenshotTool(1, { format: "jpeg" });
 
     assert.equal(result.ok, false);
     assert.equal(typeof result.error, "string");
@@ -547,38 +357,28 @@ describe("screenshotTool — malformed/empty capture output", () => {
 
 describe("end-to-end — screenshot → extract → message", () => {
   it("full debugger pipeline produces valid OpenAI image content", async () => {
-    // 1. Take screenshot via debugger
-    const chrome = buildChromeMock({ captureData: "AAAA" });
-    const screenshotResult = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const { sandbox } = loadBackground({ captureData: "AAAA" });
+    const screenshotResult = await sandbox.screenshotTool(1, { format: "jpeg" });
 
-    // 2. Extract images (sidepanel.js logic)
     const imagePayloads = extractImages(screenshotResult);
-
-    // 3. Build tool message (stringified result — no image data in it)
     const toolMessage = buildToolMessage("call_ss_1", screenshotResult);
-
-    // 4. Build image message (if images present)
     const imageMessage = buildImageMessage(imagePayloads, "call_ss_1");
 
-    // Verify tool message
     assert.equal(toolMessage.role, "tool");
     assert.equal(toolMessage.tool_call_id, "call_ss_1");
     const parsed = JSON.parse(toolMessage.content);
     assert.equal(parsed.ok, true);
-    // _images should have been removed by extractImages
     assert.equal(parsed.data._images, undefined);
 
-    // Verify image message
     assert.ok(imageMessage, "Should have image message");
     assert.equal(imageMessage.role, "user");
-    assert.equal(imageMessage.content.length, 2); // 1 text + 1 image
+    assert.equal(imageMessage.content.length, 2);
 
-    // Verify image_url structure (OpenAI format)
     const imgPart = imageMessage.content[1];
     assert.equal(imgPart.type, "image_url");
     assert.ok(
-      imgPart.image_url.url.startsWith("data:"),
-      "URL must start with data:"
+      imgPart.image_url.url.startsWith("data:image/"),
+      "URL must start with data:image/"
     );
     assert.ok(
       imgPart.image_url.url.includes(";base64,"),
@@ -588,36 +388,36 @@ describe("end-to-end — screenshot → extract → message", () => {
   });
 
   it("visible-tab fallback produces same end-to-end result shape", async () => {
-    const chrome = buildChromeMock({
+    const { sandbox } = loadBackground({
       debuggerFail: true,
-      visibleTabDataUrl: "data:image/jpeg;base64,FALLBACK"
+      visibleTabDataUrl: "image/jpeg;base64,FALLBACK"
     });
 
-    const screenshotResult = await screenshotToolLogic(chrome, 1, { format: "jpeg" });
+    const screenshotResult = await sandbox.screenshotTool(1, { format: "jpeg" });
     const imagePayloads = extractImages(screenshotResult);
     const imageMessage = buildImageMessage(imagePayloads, "call_fb_1");
 
     assert.equal(screenshotResult.ok, true);
     assert.equal(imagePayloads.length, 1);
-    assert.equal(imagePayloads[0], "data:image/jpeg;base64,FALLBACK");
+    assert.equal(imagePayloads[0], "image/jpeg;base64,FALLBACK");
     assert.ok(imageMessage);
-    assert.equal(imageMessage.content[1].image_url.url, "data:image/jpeg;base64,FALLBACK");
+    assert.equal(imageMessage.content[1].image_url.url, "image/jpeg;base64,FALLBACK");
   });
 
   it("all three MIME types produce valid URLs end-to-end", async () => {
     for (const format of ["png", "jpeg", "webp"]) {
-      const chrome = buildChromeMock({ captureData: "AAAA" });
-      const result = await screenshotToolLogic(chrome, 1, { format });
+      const { sandbox } = loadBackground({ captureData: "AAAA" });
+      const result = await sandbox.screenshotTool(1, { format });
       const images = extractImages(result);
       const msg = buildImageMessage(images, `call_${format}_1`);
 
       assert.ok(msg, `${format}: should have image message`);
       const url = msg.content[1].image_url.url;
-      assert.ok(url.startsWith("data:"), `${format}: URL must start with data:`);
-      assert.ok(url.includes(`;base64,`), `${format}: URL must contain ;base64,`);
+      assert.ok(url.startsWith("data:image/"), `${format}: URL must start with data:image/`);
+      assert.ok(url.includes(";base64,"), `${format}: URL must contain ;base64,`);
       assert.ok(
         url.startsWith(`data:${MIME_MAP[format]};base64,`),
-        `${format}: URL must have correct MIME in data: prefix`
+        `${format}: URL must have correct MIME in prefix`
       );
     }
   });
