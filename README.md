@@ -22,7 +22,7 @@ Chrome Manifest V3 extension that adds a neobrutalist pastel chat side panel. It
 
 Default:
 
-- Base URL: `http://localhost:8000`
+- Base URL: `http://localhost:8000/v1`
 - Models path: `/models`
 - Chat path: `/chat/completions`
 

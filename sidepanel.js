@@ -13,7 +13,7 @@ Rules:
 - When finished, answer in plain text without tool calls unless another tool call is needed.`;
 
 const DEFAULT_SETTINGS = {
-  baseUrl: "http://localhost:8000",
+  baseUrl: "http://localhost:8000/v1",
   modelsPath: "/models",
   chatPath: "/chat/completions",
   apiKey: "",

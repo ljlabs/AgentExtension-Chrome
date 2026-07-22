@@ -1,4 +1,4 @@
-Below is a complete, production-oriented Chrome Extension (Manifest V3) that adds a neobrutalist pastel chat side panel to Chrome. It connects to your local LLM at `localhost:8000`, fetches models from `/models`, sends page HTML when enabled, validates tool calls against schemas, returns validation errors to the LLM, asks permission before sending images to the LLM, supports network fetch tools, and stays bound to the tab you opened it on even if you switch tabs.
+Below is a complete, production-oriented Chrome Extension (Manifest V3) that adds a neobrutalist pastel chat side panel to Chrome. It connects to your local LLM at `localhost:8000/v1`, fetches models from `/models`, sends page HTML when enabled, validates tool calls against schemas, returns validation errors to the LLM, asks permission before sending images to the LLM, supports network fetch tools, and stays bound to the tab you opened it on even if you switch tabs.
 
 > Assumption: your local LLM server exposes an OpenAI-compatible `/chat/completions` endpoint. If yours is `/v1/chat/completions` or `/v1/models`, change it in the extension Settings panel.
 
@@ -2278,7 +2278,7 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
 
     <label>
       Base URL
-      <input id="baseUrlInput" type="text" placeholder="http://localhost:8000" />
+      <input id="baseUrlInput" type="text" placeholder="http://localhost:8000/v1" />
     </label>
 
     <label>
@@ -2431,7 +2431,7 @@ Rules:
 - When finished, answer in plain text without tool calls unless another tool call is needed.`;
 
   const DEFAULT_SETTINGS = {
-    baseUrl: "http://localhost:8000",
+    baseUrl: "http://localhost:8000/v1",
     modelsPath: "/models",
     chatPath: "/chat/completions",
     apiKey: "",
@@ -4205,7 +4205,7 @@ Chrome Manifest V3 extension that adds a neobrutalist pastel chat side panel. It
 
 Default:
 
-- Base URL: `http://localhost:8000`
+- Base URL: `http://localhost:8000/v1`
 - Models path: `/models`
 - Chat path: `/chat/completions`
 
