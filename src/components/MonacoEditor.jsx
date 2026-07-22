@@ -10,16 +10,19 @@ loader.config({ monaco });
 export default function MonacoEditor({ language, value, onChange }) {
   const editorRef = useRef(null);
 
-  function handleEditorDidMount(editor) {
+  function handleEditorDidMount(editor, monacoInstance) {
     editorRef.current = editor;
 
     // Ctrl+S / Cmd+S to save
-    editor.addCommand(
-      window.monaco.KeyMod.CtrlCmd | window.monaco.KeyCode.KeyS,
-      () => {
-        window.dispatchEvent(new CustomEvent("editor-save"));
-      }
-    );
+    const m = monacoInstance || monaco;
+    if (m && m.KeyMod && m.KeyCode) {
+      editor.addCommand(
+        m.KeyMod.CtrlCmd | m.KeyCode.KeyS,
+        () => {
+          window.dispatchEvent(new CustomEvent("editor-save"));
+        }
+      );
+    }
   }
 
   function handleChange(newValue) {
