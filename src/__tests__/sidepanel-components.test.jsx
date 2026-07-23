@@ -16,7 +16,7 @@ describe("ChatLog", () => {
       { id: "2", kind: "assistant", text: "hi there", chips: [{ name: "get_text", ok: true }] },
       { id: "3", kind: "system", text: "Ready." },
       { id: "4", kind: "error", text: "boom" },
-      { id: "5", kind: "tool-result", ok: true, title: "Tool: get_text", payloadText: "{}" }
+      { id: "5", kind: "tool-result", ok: true, toolName: "get_html", argsText: '{"maxLength":100}', resultText: '{"ok":true}' }
     ];
 
     render(<ChatLog items={items} />);
@@ -26,7 +26,31 @@ describe("ChatLog", () => {
     expect(screen.getByText("get_text")).toBeInTheDocument();
     expect(screen.getByText("Ready.")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
-    expect(screen.getByText("Tool: get_text")).toBeInTheDocument();
+    expect(screen.getByText("get_html")).toBeInTheDocument();
+  });
+
+  it("tool bubble collapses result by default and expands on click", () => {
+    render(<ChatLog items={[
+      { id: "t1", kind: "tool-result", ok: true, toolName: "get_text", argsText: "{}", resultText: '{"ok":true,"data":"page text"}' }
+    ]} />);
+
+    // Collapsed: result hidden, header visible.
+    expect(screen.queryByText(/page text/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    expect(screen.getByText(/page text/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { expanded: true }));
+    expect(screen.queryByText(/page text/)).not.toBeInTheDocument();
+  });
+
+  it("failed tool bubble renders with error styling and ✗ marker", () => {
+    render(<ChatLog items={[
+      { id: "t2", kind: "tool-result", ok: false, toolName: "click", argsText: '{"ref":"e9"}', resultText: '{"ok":false,"error":"Ref not found"}' }
+    ]} />);
+
+    expect(screen.getByText("✗")).toBeInTheDocument();
+    expect(screen.getByText("click")).toBeInTheDocument();
   });
 
   it("marks invalid tool chips", () => {

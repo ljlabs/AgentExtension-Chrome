@@ -423,6 +423,60 @@ body {
   background: var(--danger);
 }
 
+/* Single tool-call bubble: header row toggles a collapsed result */
+.tool-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-bubble-status {
+  flex: 0 0 auto;
+  font-weight: 900;
+}
+
+.tool-bubble-status.failed {
+  color: #fff;
+}
+
+.tool-bubble-name {
+  flex: 0 0 auto;
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.tool-bubble-args {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.tool-bubble-chevron {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.tool-bubble-result {
+  max-height: 300px;
+  overflow: auto;
+}
+
 pre {
   margin: 8px 0 0;
   padding: 8px;

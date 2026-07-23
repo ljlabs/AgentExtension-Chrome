@@ -2,6 +2,7 @@ import Markdown from "./Markdown.jsx";
 import QuestionCard from "./QuestionCard.jsx";
 import ApprovalCard from "./ApprovalCard.jsx";
 import PlanCard from "./PlanCard.jsx";
+import ToolCallBubble from "./ToolCallBubble.jsx";
 
 const INTERACTIVE_TITLES = {
   ask_user_question: "Clarifying Question",
@@ -61,11 +62,7 @@ export default function MessageItem({ item }) {
       );
 
     case "tool-result":
-      return (
-        <Message className={item.ok ? "tool" : "error"} title={item.title}>
-          <pre>{item.payloadText}</pre>
-        </Message>
-      );
+      return <ToolCallBubble item={item} />;
 
     case "interactive": {
       const title = INTERACTIVE_TITLES[item.uiType] || "Interaction";

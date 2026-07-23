@@ -52,17 +52,19 @@ function addAssistantMessage(text, validations = []) {
 }
 
 function addToolResult(validation, result) {
+  // Interactive tools (question/approval/plan) already render as a card —
+  // the card IS the record; don't add a duplicate JSON bubble.
+  if (result && result.ui) return;
+
   const ok = Boolean(result && result.ok);
-  const payload = {
-    arguments: validation.args ?? validation.normalized?.function?.arguments,
-    result
-  };
+  const args = validation.args ?? validation.normalized?.function?.arguments ?? {};
 
   pushItem({
     kind: "tool-result",
     ok,
-    title: `Tool: ${validation.name}`,
-    payloadText: truncate(JSON.stringify(payload, null, 2), 8000)
+    toolName: validation.name || "tool",
+    argsText: truncate(typeof args === "string" ? args : JSON.stringify(args), 300),
+    resultText: truncate(JSON.stringify(result, null, 2), 8000)
   });
 }
 
@@ -101,6 +103,20 @@ export function addError(text, options = {}) {
 function rebuildChatItems() {
   state.chatItems = [];
 
+  // Map tool_call_id → {name, arguments} so restored tool bubbles keep
+  // their tool names and argument summaries.
+  const callIndex = new Map();
+  for (const msg of state.messages) {
+    if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+      for (const toolCall of msg.tool_calls) {
+        callIndex.set(toolCall.id, {
+          name: toolCall.function?.name || toolCall.name || "tool",
+          argsText: toolCall.function?.arguments || "{}"
+        });
+      }
+    }
+  }
+
   for (const msg of state.messages) {
     const content = messageContentToText(msg.content);
 
@@ -116,8 +132,27 @@ function rebuildChatItems() {
     } else if (msg.role === "error") {
       pushItem({ kind: "error", text: content });
     } else if (msg.role === "tool") {
-      if (msg.ui) addCompletedToolUi(msg.ui);
-      pushItem({ kind: "tool-result", ok: true, title: "Tool Result", payloadText: truncate(content, 500) });
+      // Interactive tools restore as their card only — no JSON bubble.
+      if (msg.ui) {
+        addCompletedToolUi(msg.ui);
+        continue;
+      }
+
+      const call = callIndex.get(msg.tool_call_id) || {};
+      let ok = true;
+      try {
+        ok = JSON.parse(content)?.ok !== false;
+      } catch {
+        // non-JSON content — leave ok true
+      }
+
+      pushItem({
+        kind: "tool-result",
+        ok,
+        toolName: call.name || "tool",
+        argsText: truncate(call.argsText || "", 300),
+        resultText: truncate(content, 8000)
+      });
     }
   }
 
