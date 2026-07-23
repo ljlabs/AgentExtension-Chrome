@@ -80,10 +80,12 @@ describe("gating", () => {
     expect(requiresFreshApproval("scroll_to", { safeMode: true })).toBe(false);
   });
 
-  it("PLAN_GATED_TOOLS covers the write actions", () => {
-    for (const tool of ["click", "type_text", "set_value", "press_key", "scroll_to", "write_browser_storage"]) {
+  it("PLAN_GATED_TOOLS covers the write actions but not read-only scroll_to", () => {
+    for (const tool of ["click", "type_text", "set_value", "press_key", "write_browser_storage"]) {
       expect(PLAN_GATED_TOOLS.has(tool)).toBe(true);
     }
+    // scroll_to is read-only; the system prompt promises it is never gated.
+    expect(PLAN_GATED_TOOLS.has("scroll_to")).toBe(false);
   });
 });
 

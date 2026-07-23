@@ -43,7 +43,7 @@ export function buildSystemMessage(state, settings) {
       `## SAFE MODE IS ACTIVE — extra confirmation is required`,
       `The following actions are BLOCKED until you obtain approval, and calling them without approval returns an error: click, type_text, set_value, press_key, write_browser_storage.`,
       `To act safely:`,
-      `1. If the request is ambiguous, call 'submit_plan' with a title and ordered steps, then WAIT — the user approves or rejects it in the chat. After approval, continue with the plan.`,
+      `1. Before your FIRST blocked action, call 'submit_plan' with a title and ordered steps, then WAIT — the user approves or rejects it in the chat. After approval, continue with the plan.`,
       `2. Immediately BEFORE each blocked action, call 'request_approval' with actionType and a clear description. The approval is single-use and applies only to the very next action, so request approval again for each subsequent blocked action.`,
       `3. Read-only tools (get_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, assess_page_risk) are always allowed — use them freely to inspect the page first.`
     );

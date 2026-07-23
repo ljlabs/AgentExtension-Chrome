@@ -504,7 +504,25 @@ export function onStop() {
     closePermission({ allow: false, scope: "once" });
   }
 
+  // Cancel any pending interactive cards (question/approval/plan). Without
+  // this, runAgent awaits the card promise forever and the tab-switch queue
+  // deadlocks behind state.runPromise.
+  cancelPendingInteractions();
+
   setStatus("Stopping...");
+}
+
+function cancelPendingInteractions() {
+  for (const [interactionId, resolve] of interactionResolvers) {
+    const item = state.chatItems.find((entry) => entry.id === interactionId);
+    if (item) {
+      item.pending = false;
+      item.response = { cancelled: true, approved: false, answer: "Cancelled by user (agent stopped)." };
+    }
+    resolve({ cancelled: true, approved: false, answer: "Cancelled by user (agent stopped)." });
+  }
+  interactionResolvers.clear();
+  emit();
 }
 
 export async function onClear() {
@@ -833,7 +851,7 @@ export function closePermission(response) {
 
 // --- Tool dispatch ---
 
-async function executeToolWithPermissions(name, args) {
+export async function executeToolWithPermissions(name, args) {
   try {
     if (requiresApprovedPlan(name, state) && (!state.currentPlan || state.currentPlan.approved !== true)) {
       return {
