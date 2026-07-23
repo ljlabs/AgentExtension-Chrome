@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:extension": "echo 'Extension files are in public/ — load this directory in Chrome'",
+    "build:extension": "vite build",
     "test": "vitest run",
     "test:watch": "vitest"
   },
