@@ -6,9 +6,9 @@
   "description": "Chrome browser agent with neobrutalist side panel, tool validation, and an editor add-on for managing skills, memories, and rules.",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build -c vite.config.background.js && vite build -c vite.config.content.js",
     "preview": "vite preview",
-    "build:extension": "echo 'Extension files are in public/ — load this directory in Chrome'",
+    "build:extension": "npm run build && echo 'Load the dist/ directory in Chrome (chrome://extensions → Load unpacked)'",
     "test": "vitest run",
     "test:watch": "vitest"
   },

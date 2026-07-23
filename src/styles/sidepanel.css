@@ -42,6 +42,14 @@ body {
     sans-serif;
 }
 
+/* React mounts inside #root; it takes over body's flex-column layout. */
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+}
+
 .hidden {
   display: none !important;
 }

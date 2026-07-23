@@ -1,8 +1,4 @@
-try {
-  importScripts("network.js");
-} catch (err) {
-  console.error("Failed to import network.js", err);
-}
+import { performHttpRequest } from "../lib/network.js";
 
 const RESTRICTED_URL_RE =
   /^(chrome|edge|about|chrome-extension|devtools|view-source|file):|^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/i;
@@ -952,3 +948,6 @@ async function handleRecordRiskAssessment(args) {
   await saveRiskPatterns(updated);
   return { ok: true, data: { recorded: newEntry, totalPatterns: updated.length } };
 }
+
+// Exported for unit tests (Vitest imports this module with a mocked chrome global).
+export { screenshotTool, handleExecuteTool, clampInt };
