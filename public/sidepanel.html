@@ -23,11 +23,15 @@
     </div>
 
     <div class="header-actions">
-      <button id="planModeBtn" class="btn small" type="button" title="Toggle Plan Mode">Plan: OFF</button>
-      <button id="editBtn" class="btn small" type="button">Edit</button>
-      <button id="rebindBtn" class="btn small" type="button">Rebind</button>
-      <button id="settingsBtn" class="btn small" type="button">Settings</button>
-      <button id="clearBtn" class="btn small danger" type="button">Clear</button>
+      <button id="menuToggleBtn" class="btn small menu-toggle" type="button" aria-label="Menu" title="Menu">☰</button>
+      <div id="menuDropdown" class="menu-dropdown hidden">
+        <button id="planModeBtn" class="btn small menu-item" type="button" title="Toggle Plan Mode: agent must submit a plan for tasks with 3+ steps">Plan: OFF</button>
+        <button id="safeModeBtn" class="btn small menu-item" type="button" title="Toggle Safe Mode: enforces ALL guardrails — clarify, research, plan, and approve every action">Safe: OFF</button>
+        <button id="editBtn" class="btn small menu-item" type="button">Edit</button>
+        <button id="rebindBtn" class="btn small menu-item" type="button">Rebind</button>
+        <button id="settingsBtn" class="btn small menu-item" type="button">Settings</button>
+        <button id="clearBtn" class="btn small danger menu-item" type="button">Clear</button>
+      </div>
     </div>
   </header>
 
@@ -115,8 +119,8 @@ https://*.example.com
     </label>
 
     <label>
-      Extra system prompt
-      <textarea id="systemPromptInput" rows="6" placeholder="Optional instructions for the agent"></textarea>
+      Extra system prompt (appended to defaults, or replaces if filled)
+      <textarea id="systemPromptInput" rows="6" placeholder="Optional extra instructions for the agent (leave blank to use built-in guardrail prompt)"></textarea>
     </label>
 
     <hr style="border:1px solid var(--ink); margin: 15px 0;" />

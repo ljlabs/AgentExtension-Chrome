@@ -3,7 +3,7 @@
 
 const DEFAULT_SYSTEM_PROMPT = `You are a careful browser automation agent running inside a Chrome extension side panel.
 
-Rules:
+## Core Rules
 - You control only the bound browser tab described in the context.
 - Do not ask to switch tabs. The extension keeps you bound to the original tab.
 - Use tools to inspect the page before answering questions.
@@ -12,12 +12,40 @@ Rules:
 - Do not invent refs, selectors, or page facts.
 - When finished, answer in plain text without tool calls unless another tool call is needed.
 
-Guardrails & Plan Mode:
-- Use 'submit_plan' before executing complex, multi-step tasks (e.g. deployments, form filings, bulk modifications) or when Plan Mode is enabled.
-- Use 'ask_user_question' to ask clarifying questions with recommended options when user requirements are ambiguous.
-- Use 'request_approval' before performing high-risk actions such as form submissions, purchases, deletions, deployments, file transfers, or sending messages.
-- Use 'record_risk_assessment' to save newly identified risk patterns so future sessions automatically recognize them.
-- Use 'assess_page_risk' to scan pages for high-risk targets before taking actions.`;
+## Step 1 — Clarify Before Acting
+Before starting ANY task, evaluate whether the request is sufficiently clear:
+- If the goal, scope, target, or approach is ambiguous, call 'ask_user_question' FIRST with 2-4 recommended options.
+- Include a free-text field so the user can add nuance.
+- Do NOT begin taking browser actions until you have enough information to act safely.
+- For simple, unambiguous 1-step requests (e.g. "what is on this page?") you may skip clarification.
+
+## Step 2 — Research Phase (for complex tasks)
+For tasks involving 3 or more steps (e.g. deployments, form filings, multi-page workflows):
+- Use get_page_info, get_text, or get_interactive_snapshot to read relevant page content BEFORE planning.
+- Identify the specific forms, buttons, and flows involved.
+- Check for any warnings, requirements, or prerequisites shown on the page.
+- Only proceed to planning once you understand the page context.
+
+## Step 3 — Plan Mode (for multi-step tasks)
+For tasks requiring 3 or more browser actions:
+- Call 'submit_plan' with a clear title, ordered steps list, and notes about risks/assumptions.
+- Wait for the user to Approve or Reject the plan before executing anything.
+- If the user provides feedback or rejects the plan, revise and resubmit.
+- Never skip the plan step for complex tasks — this keeps the user in control.
+
+## Step 4 — Approval for High-Risk Actions
+Always call 'request_approval' before performing ANY of the following, even if part of an approved plan:
+- Clicking a submit, confirm, checkout, publish, deploy, send, delete, or remove button.
+- Filling in and submitting any form that affects real data (accounts, purchases, messages, files).
+- Navigating away from the current page in a way that loses form state.
+- Making HTTP POST/PUT/DELETE requests via http_request.
+- Any action on a payment, authentication, or settings page.
+Include 'actionType', a clear 'description' of what will happen, and 'details' with relevant context (target URL, element text, form values).
+
+## Risk Awareness
+- Use 'assess_page_risk' when arriving at a new page during a task to identify high-risk elements.
+- Use 'record_risk_assessment' to save any new risk patterns you discover for future sessions.
+- When in doubt about whether an action is risky, treat it as high-risk and request approval.`;
 
 const DEFAULT_SETTINGS = {
   baseUrl: "http://localhost:8000/v1",
@@ -34,7 +62,8 @@ const DEFAULT_SETTINGS = {
   modelSupportsVision: true,
   autoAllowLocalhostNetwork: true,
   networkAllowlist: [],
-  systemPrompt: ""
+  systemPrompt: "",
+  safeMode: false
 };
 
 const TOOL_MAP = globalThis.AGENT_TOOL_MAP || {};
@@ -55,6 +84,12 @@ function devWarn(label, ...args) {
   if (DEBUG) console.warn(`%c[Agent]%c ${label}`, "color:#f80;font-weight:bold", "color:inherit", ...args);
 }
 
+function truncate(str, maxLen = 100) {
+  if (typeof str !== "string") return "";
+  if (str.length <= maxLen) return str;
+  return `${str.slice(0, maxLen)}...`;
+}
+
 const state = {
   boundTabId: null,
   boundTab: null,
@@ -69,6 +104,7 @@ const state = {
   visionFailed: false,
   activePermission: null,
   planMode: false,
+  safeMode: false,
   currentPlan: null
 };
 
@@ -168,6 +204,17 @@ async function init() {
   await loadSettings();
   applySettingsToForm();
 
+  // Sync button visual states from persisted settings
+  if (state.safeMode && dom.safeModeBtn) {
+    dom.safeModeBtn.textContent = "Safe: ON";
+    dom.safeModeBtn.classList.add("safe-active");
+    if (dom.planModeBtn) dom.planModeBtn.disabled = true;
+  }
+  if (state.planMode && dom.planModeBtn) {
+    dom.planModeBtn.textContent = "Plan: ON";
+    dom.planModeBtn.classList.add("plan-active");
+  }
+
   await bindInitialTab();
   await refreshBoundTabInfo();
   renderChatLog();
@@ -179,7 +226,10 @@ async function init() {
 }
 
 function cacheDom() {
+  dom.menuToggleBtn = document.getElementById("menuToggleBtn");
+  dom.menuDropdown = document.getElementById("menuDropdown");
   dom.planModeBtn = document.getElementById("planModeBtn");
+  dom.safeModeBtn = document.getElementById("safeModeBtn");
   dom.tabInfo = document.getElementById("tabInfo");
   dom.editBtn = document.getElementById("editBtn");
   dom.rebindBtn = document.getElementById("rebindBtn");
@@ -223,7 +273,27 @@ function cacheDom() {
 }
 
 function attachListeners() {
+  if (dom.menuToggleBtn && dom.menuDropdown) {
+    dom.menuToggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dom.menuDropdown.classList.toggle("hidden");
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!dom.menuDropdown.contains(e.target) && e.target !== dom.menuToggleBtn) {
+        dom.menuDropdown.classList.add("hidden");
+      }
+    });
+
+    dom.menuDropdown.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        dom.menuDropdown.classList.add("hidden");
+      });
+    });
+  }
+
   dom.planModeBtn.addEventListener("click", togglePlanMode);
+  dom.safeModeBtn.addEventListener("click", toggleSafeMode);
   dom.sendBtn.addEventListener("click", onSend);
   dom.stopBtn.addEventListener("click", onStop);
   dom.clearBtn.addEventListener("click", onClear);
@@ -258,6 +328,7 @@ function attachListeners() {
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (tabId !== state.boundTabId) return;
 
+    devLog("Tab updated:", tabId, changeInfo);
     if (changeInfo.title || changeInfo.url || changeInfo.status) {
       refreshBoundTabInfo().catch(() => { });
     }
@@ -269,6 +340,7 @@ function attachListeners() {
 
   chrome.tabs.onRemoved.addListener((tabId) => {
     if (tabId === state.boundTabId) {
+      devWarn("Bound tab removed:", tabId);
       state.boundTabId = null;
       state.boundTab = null;
       refreshBoundTabInfo().catch(() => { });
@@ -278,6 +350,7 @@ function attachListeners() {
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === "tabActivated") {
+      devLog("Received tabActivated message:", message);
       handleTabActivated(message.tabId, message.url || "").catch(() => {});
     }
   });
@@ -286,6 +359,11 @@ function attachListeners() {
 async function loadSettings() {
   const stored = await chrome.storage.local.get("settings");
   settings = normalizeSettings({ ...DEFAULT_SETTINGS, ...(stored.settings || {}) });
+  // Restore mode state from persisted settings
+  if (settings.safeMode) {
+    state.safeMode = true;
+    state.planMode = true;
+  }
 }
 
 function normalizeSettings(input) {
@@ -313,7 +391,8 @@ function normalizeSettings(input) {
     modelSupportsVision: Boolean(input.modelSupportsVision),
     autoAllowLocalhostNetwork: Boolean(input.autoAllowLocalhostNetwork),
     networkAllowlist,
-    systemPrompt: String(input.systemPrompt || "")
+    systemPrompt: String(input.systemPrompt || ""),
+    safeMode: Boolean(input.safeMode)
   };
 }
 
@@ -351,7 +430,8 @@ async function saveSettings() {
     modelSupportsVision: dom.modelVisionToggle.checked,
     autoAllowLocalhostNetwork: dom.autoLocalhostToggle.checked,
     networkAllowlist: dom.networkAllowlistInput.value,
-    systemPrompt: dom.systemPromptInput.value
+    systemPrompt: dom.systemPromptInput.value,
+    safeMode: state.safeMode
   };
 
   settings = normalizeSettings(formSettings);
@@ -367,26 +447,48 @@ async function bindInitialTab() {
 
     if (pending && pending.pendingBindTabId) {
       state.boundTabId = pending.pendingBindTabId;
+      devLog("Bound initial tab from pendingBindTabId:", state.boundTabId);
       await chrome.storage.session.remove("pendingBindTabId");
       await loadTabState(state.boundTabId);
       return;
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    devWarn("Failed reading pendingBindTabId:", err);
   }
 
   state.boundTabId = await getActiveTabIdInLastNormalWindow();
+  devLog("Bound initial tab to active tab in window:", state.boundTabId);
   await loadTabState(state.boundTabId);
 }
 
 async function getActiveTabIdInLastNormalWindow() {
   try {
     const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
-    const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
-    return tabs[0]?.id || null;
-  } catch {
+    if (win && win.id) {
+      const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+      devLog("getLastFocused window active tab search:", tabs);
+      if (tabs[0] && tabs[0].id) return tabs[0].id;
+    }
+  } catch (err) {
+    devWarn("getLastFocused window search failed:", err);
+  }
+
+  try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tabs[0]?.id || null;
+    devLog("currentWindow active tab search:", tabs);
+    if (tabs[0] && tabs[0].id) return tabs[0].id;
+  } catch (err) {
+    devWarn("currentWindow active tab search failed:", err);
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true });
+    devLog("all active tabs search:", tabs);
+    const normalTab = tabs.find((t) => t && t.url && !t.url.startsWith("chrome-extension://"));
+    return normalTab ? normalTab.id : (tabs[0] ? tabs[0].id : null);
+  } catch (err) {
+    devWarn("all active tabs search failed:", err);
+    return null;
   }
 }
 
@@ -394,6 +496,7 @@ async function onRebind() {
   const oldTabId = state.boundTabId;
 
   state.boundTabId = await getActiveTabIdInLastNormalWindow();
+  devLog("Rebind requested. Old tab:", oldTabId, "New tab:", state.boundTabId);
 
   if (state.boundTabId !== oldTabId) {
     await saveTabState(oldTabId);
@@ -413,15 +516,22 @@ async function onRebind() {
 }
 
 async function handleTabActivated(newTabId, newTabUrl) {
-  if (state.isRunning) return;
+  if (state.isRunning) {
+    devLog("Tab activated ignored because agent is running:", newTabId);
+    return;
+  }
 
   if (newTabId === state.boundTabId) return;
 
   // Ignore switches to extension-owned pages (e.g. the editor tab opened
   // by clicking the Edit button). These aren't real browsing tabs and
   // switching to them should not reset/replace the current chat session.
-  if (newTabUrl && newTabUrl.startsWith("chrome-extension://")) return;
+  if (newTabUrl && newTabUrl.startsWith("chrome-extension://")) {
+    devLog("Tab activated ignored because URL is chrome-extension://:", newTabUrl);
+    return;
+  }
 
+  devLog("Switching bound tab from", state.boundTabId, "to", newTabId);
   await saveTabState(state.boundTabId);
 
   state.boundTabId = newTabId;
@@ -452,7 +562,8 @@ async function refreshBoundTabInfo() {
     dom.tabInfo.textContent = `${truncate(label, 60)} (#${tab.id})`;
     dom.tabInfo.title = `${tab.url || ""}\nTab ID: ${tab.id}`;
     renderStatusPill();
-  } catch {
+  } catch (err) {
+    devWarn(`Failed to get tab info for tabId ${state.boundTabId}:`, err);
     state.boundTabId = null;
     state.boundTab = null;
     dom.tabInfo.textContent = "Bound tab closed";
@@ -857,18 +968,49 @@ function buildInitialApiMessages() {
 }
 
 function buildSystemMessage() {
-  const customPrompt = settings.systemPrompt && settings.systemPrompt.trim() ? settings.systemPrompt.trim() : DEFAULT_SYSTEM_PROMPT;
+  const basePrompt = settings.systemPrompt && settings.systemPrompt.trim()
+    ? settings.systemPrompt.trim()
+    : DEFAULT_SYSTEM_PROMPT;
 
   const tab = state.boundTab || {};
+
+  // Build dynamic guardrail addendum based on active modes
+  const guardrailAddendum = [];
+
+  if (state.safeMode) {
+    guardrailAddendum.push(
+      `## SAFE MODE IS ACTIVE`,
+      `All guardrails are enforced at maximum strictness:`,
+      `1. You MUST call 'ask_user_question' before starting ANY task unless it is a simple read-only question about the page.`,
+      `2. You MUST call 'assess_page_risk' immediately after reading a new page during a task.`,
+      `3. You MUST call 'submit_plan' for ANY task involving 2 or more browser actions. Wait for approval before proceeding.`,
+      `4. You MUST call 'request_approval' before EVERY click, form submission, or data-modifying action — even within an approved plan.`,
+      `5. Never assume. Never skip. Never proceed without explicit user confirmation.`
+    );
+  } else {
+    if (state.planMode) {
+      guardrailAddendum.push(
+        `## PLAN MODE IS ACTIVE`,
+        `You MUST call 'submit_plan' before executing any sequence of browser actions involving 3 or more steps.`,
+        `Wait for the user to approve or reject before proceeding. Revise and resubmit if rejected.`,
+        `For tasks with 1-2 simple steps you may proceed, but still clarify ambiguities first.`
+      );
+    }
+  }
+
+  const addendum = guardrailAddendum.length
+    ? `\n\n---\n${guardrailAddendum.join("\n")}`
+    : "";
 
   return {
     role: "system",
     content:
-      `${customPrompt}\n\n` +
+      `${basePrompt}${addendum}\n\n` +
       `Bound tab title: ${tab.title || "unknown"}\n` +
       `Bound tab URL: ${tab.url || "unknown"}\n` +
       `Bound tab ID: ${state.boundTabId || "unknown"}\n` +
-      `Current time: ${new Date().toISOString()}\n\n` +
+      `Current time: ${new Date().toISOString()}\n` +
+      `Active modes: Plan Mode=${state.planMode ? "ON" : "OFF"}, Safe Mode=${state.safeMode ? "ON" : "OFF"}\n\n` +
       `Important: stay attached to this bound tab. Do not request tab switches.`
   };
 }
@@ -1521,12 +1663,42 @@ function ensureLeadingSlash(path) {
 }
 
 function togglePlanMode() {
+  // If safe mode is on, plan mode is locked on
+  if (state.safeMode) {
+    addSystem("Plan Mode is locked ON while Safe Mode is active.");
+    return;
+  }
   state.planMode = !state.planMode;
   if (dom.planModeBtn) {
     dom.planModeBtn.textContent = state.planMode ? "Plan: ON" : "Plan: OFF";
     dom.planModeBtn.classList.toggle("plan-active", state.planMode);
   }
   addSystem(`Plan Mode ${state.planMode ? "enabled" : "disabled"}.`);
+}
+
+function toggleSafeMode() {
+  state.safeMode = !state.safeMode;
+
+  // Safe Mode forces Plan Mode on
+  if (state.safeMode) {
+    state.planMode = true;
+  }
+
+  if (dom.safeModeBtn) {
+    dom.safeModeBtn.textContent = state.safeMode ? "Safe: ON" : "Safe: OFF";
+    dom.safeModeBtn.classList.toggle("safe-active", state.safeMode);
+  }
+  if (dom.planModeBtn) {
+    dom.planModeBtn.textContent = state.planMode ? "Plan: ON" : "Plan: OFF";
+    dom.planModeBtn.classList.toggle("plan-active", state.planMode);
+    dom.planModeBtn.disabled = state.safeMode; // lock plan mode btn when safe mode is on
+  }
+
+  // Persist safe mode to settings
+  settings.safeMode = state.safeMode;
+  chrome.storage.local.set({ settings }).catch(() => {});
+
+  addSystem(`Safe Mode ${state.safeMode ? "enabled — all guardrails enforced at maximum strictness" : "disabled"}.`);
 }
 
 async function renderQuestionInChat(args) {

@@ -139,8 +139,35 @@ body {
 }
 
 .header-actions {
+  position: relative;
   display: flex;
+  align-items: center;
+}
+
+.menu-toggle {
+  font-size: 16px;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+  background: var(--yellow);
+  border: 4px solid var(--ink);
+  box-shadow: var(--shadow-lg);
+  padding: 10px;
+  min-width: 140px;
+}
+
+.menu-dropdown .menu-item {
+  width: 100%;
+  text-align: left;
 }
 
 .btn {
@@ -478,6 +505,19 @@ pre {
   background: var(--purple) !important;
   color: var(--ink);
   font-weight: 900;
+}
+
+.btn.safe-active {
+  background: #ff6b35 !important;
+  color: #fff !important;
+  font-weight: 900;
+  border-color: var(--ink) !important;
+  animation: safe-pulse 2s ease-in-out infinite;
+}
+
+@keyframes safe-pulse {
+  0%, 100% { box-shadow: var(--shadow); }
+  50% { box-shadow: 5px 5px 0 0 var(--ink), 0 0 12px rgba(255, 107, 53, 0.6); }
 }
 
 .plan-card {

@@ -19,25 +19,34 @@ function clampInt(value, min, max, fallback) {
 
 async function configureSidePanel() {
   try {
+    console.log("[Background] Configuring side panel options and behavior...");
     await chrome.sidePanel.setOptions({
       enabled: true,
       path: "sidepanel.html"
     });
 
     await chrome.sidePanel.setPanelBehavior({
-      openPanelOnActionClick: false
+      openPanelOnActionClick: true
     });
+    console.log("[Background] Side panel configured successfully with openPanelOnActionClick = true.");
   } catch (err) {
-    console.error("Side panel configuration failed", err);
+    console.error("[Background] Side panel configuration failed:", err);
   }
 }
 
-chrome.runtime.onInstalled.addListener(configureSidePanel);
-chrome.runtime.onStartup.addListener(configureSidePanel);
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("[Background] Extension installed/updated.");
+  configureSidePanel();
+});
+chrome.runtime.onStartup.addListener(() => {
+  console.log("[Background] Browser startup.");
+  configureSidePanel();
+});
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
+    console.log("[Background] Tab activated:", activeInfo.tabId, tab.url);
     chrome.runtime.sendMessage({
       type: "tabActivated",
       tabId: activeInfo.tabId,
@@ -45,12 +54,13 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       title: tab.title || ""
     }).catch(() => {});
   } catch (err) {
-    console.error("onActivated error", err);
+    console.error("[Background] onActivated error:", err);
   }
 });
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab || !tab.id) return;
+  console.log("[Background] Action clicked for tab:", tab.id, tab.url);
 
   try {
     await chrome.storage.session.set({
@@ -59,12 +69,14 @@ chrome.action.onClicked.addListener(async (tab) => {
     });
 
     await chrome.sidePanel.open({ tabId: tab.id });
+    console.log("[Background] Side panel opened for tab:", tab.id);
   } catch (err) {
-    console.error("Failed opening side panel", err);
+    console.error("[Background] Failed opening side panel for tab:", err);
     try {
       await chrome.sidePanel.open({ windowId: tab.windowId });
+      console.log("[Background] Side panel opened for window:", tab.windowId);
     } catch (err2) {
-      console.error("Fallback side panel open failed", err2);
+      console.error("[Background] Fallback side panel open failed:", err2);
     }
   }
 });
