@@ -10,15 +10,17 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: resolve(__dirname, "index.html"),
-        editor: resolve(__dirname, "editor.html")
+        sidepanel: resolve(__dirname, "src/sidepanel.html"),
+        editor: resolve(__dirname, "src/editor.html"),
+        background: resolve(__dirname, "src/background.ts"),
+        content: resolve(__dirname, "src/content.ts"),
       },
       output: {
         entryFileNames: "assets/[name].js",
         chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name].[ext]"
-      }
-    }
+        assetFileNames: "assets/[name].[ext]",
+      },
+    },
   },
   test: {
     globals: true,
@@ -26,8 +28,7 @@ export default defineConfig({
     setupFiles: ["./src/__tests__/setup.jsx"],
     alias: {
       "monaco-editor": resolve(__dirname, "node_modules/monaco-editor/esm/vs/editor/editor.main.js"),
-      "@monaco-editor/react": resolve(__dirname, "node_modules/@monaco-editor/react/dist/index.mjs")
-    }
-  }
+      "@monaco-editor/react": resolve(__dirname, "node_modules/@monaco-editor/react/dist/index.mjs"),
+    },
+  },
 });
-
