@@ -69,13 +69,25 @@ describe("validateToolCall", () => {
     expect(validation.errors.length).toBeGreaterThan(0);
   });
 
-  it("catches invalid arguments", () => {
+  it("catches invalid argument types", () => {
+    // wait.ms must be an integer within range; a non-numeric string fails.
     const validation = validateToolCall({
       id: "call_3",
       type: "function",
-      function: { name: "click", arguments: JSON.stringify({}) }
+      function: { name: "wait", arguments: JSON.stringify({ ms: "not-a-number" }) }
     }, 0);
 
     expect(validation.ok).toBe(false);
+  });
+
+  it("accepts a click with a ref target (target requirement enforced at runtime, not schema)", () => {
+    const validation = validateToolCall({
+      id: "call_4",
+      type: "function",
+      function: { name: "click", arguments: JSON.stringify({ ref: "e5" }) }
+    }, 0);
+
+    expect(validation.ok).toBe(true);
+    expect(validation.args.ref).toBe("e5");
   });
 });

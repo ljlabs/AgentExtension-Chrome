@@ -841,7 +841,8 @@ async function executeToolWithPermissions(name, args) {
         error: {
           code: "plan_required",
           tool: name,
-          message: "Plan Mode requires an approved submit_plan before this browser action can run."
+          message: `Plan Mode is ON, so "${name}" is blocked until a plan is approved.`,
+          instruction: "Call the 'submit_plan' tool now with a title and an ordered list of steps, then wait for the user to approve it. After approval, call this tool again."
         }
       };
     }
@@ -852,7 +853,8 @@ async function executeToolWithPermissions(name, args) {
         error: {
           code: "approval_required",
           tool: name,
-          message: "Safe Mode requires an approved request_approval immediately before this browser action."
+          message: `Safe Mode is ON, so "${name}" is blocked until you obtain fresh approval.`,
+          instruction: `Call the 'request_approval' tool now with actionType and a description of this exact action, then wait for the user to approve. After approval, call '${name}' again immediately (approval applies only to the next action).`
         }
       };
     }

@@ -2,23 +2,23 @@ import { normalizeAndValidate } from "./validator.js";
 const TARGET_PROPERTIES = {
   ref: {
     type: "string",
-    description: "Element ref from get_interactive_snapshot, for example e12."
+    description: "Element ref from get_interactive_snapshot, e.g. \"e12\". PREFERRED — provide this."
   },
   selector: {
     type: "string",
-    description: "CSS selector."
+    description: "CSS selector. Use only if you do not have a ref."
   },
   xpath: {
     type: "string",
-    description: "XPath expression."
+    description: "XPath expression. Use only if you have neither a ref nor a selector."
   }
 };
 
-const TARGET_ANY_OF = [
-  { required: ["ref"] },
-  { required: ["selector"] },
-  { required: ["xpath"] }
-];
+// NOTE: intentionally no JSON-Schema `anyOf` for "one of ref/selector/xpath".
+// Top-level anyOf/oneOf breaks grammar-constrained decoding in many local
+// runtimes (llama.cpp, vLLM, Ollama), producing malformed action tool calls.
+// The requirement is stated in each tool description, and the content script
+// returns a clear, self-correcting error if no target is supplied.
 
 export const AGENT_TOOLS = [
   {
@@ -102,7 +102,7 @@ export const AGENT_TOOLS = [
   },
   {
     name: "click",
-    description: "Click an element in the bound tab. Prefer using ref from get_interactive_snapshot.",
+    description: "Click an element in the bound tab. Provide a target: \"ref\" from get_interactive_snapshot (preferred), or a \"selector\", or \"xpath\".",
     parameters: {
       type: "object",
       properties: {
@@ -119,13 +119,12 @@ export const AGENT_TOOLS = [
           description: "Click even if the element appears disabled."
         }
       },
-      anyOf: TARGET_ANY_OF,
       additionalProperties: false
     }
   },
   {
     name: "type_text",
-    description: "Type text into an input, textarea, or contenteditable element.",
+    description: "Type text into an input, textarea, or contenteditable element. Provide the \"text\" plus a target: \"ref\" (preferred), \"selector\", or \"xpath\".",
     parameters: {
       type: "object",
       properties: {
@@ -148,13 +147,12 @@ export const AGENT_TOOLS = [
         }
       },
       required: ["text"],
-      anyOf: TARGET_ANY_OF,
       additionalProperties: false
     }
   },
   {
     name: "set_value",
-    description: "Set the value of an input, textarea, select, checkbox, or radio.",
+    description: "Set the value of an input, textarea, select, checkbox, or radio. Provide the \"value\" plus a target: \"ref\" (preferred), \"selector\", or \"xpath\".",
     parameters: {
       type: "object",
       properties: {
@@ -165,7 +163,6 @@ export const AGENT_TOOLS = [
         }
       },
       required: ["value"],
-      anyOf: TARGET_ANY_OF,
       additionalProperties: false
     }
   },
