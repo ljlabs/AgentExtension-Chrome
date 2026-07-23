@@ -14,9 +14,10 @@ Chrome Manifest V3 extension that adds a neobrutalist pastel chat side panel. It
 
 1. Open the tab you want the agent to control.
 2. Click the extension icon.
-3. The side panel opens and binds to that tab.
-4. If you switch tabs, the agent remains bound to the original tab.
-5. Use Rebind if you want to attach to the currently active tab.
+3. The side panel opens and binds to the currently active tab.
+4. When you switch tabs, the side panel saves the current tab's chat context and automatically binds to the newly active tab.
+5. When you switch back to a previous tab, its saved chat context is loaded into the side panel.
+6. Use Rebind if you need to manually reattach or refresh the binding for the active tab.
 
 ## Local LLM settings
 
@@ -58,3 +59,10 @@ If your server uses `/v1/models` and `/v1/chat/completions`, change those in Set
 - If the bound tab is not visible, screenshots still attempt to capture that bound tab via debugger.
 - Some sites use trusted-event-only handlers. The extension uses synthetic DOM events and `element.click()`, which works for many but not all sites.
 - Full-page HTML can be very large. The Attach page HTML toggle truncates HTML to the configured max character limit.
+
+
+## Expected Behaviour
+
+1. When the side panel opens, it attaches to the active tab.
+2. When tabs are switched, the side panel saves the current tab's chat, attaches to the new active tab, and loads that tab's chat context.
+3. When switching back to a previous tab, that tab's saved chat context is restored in the side panel.

@@ -4,8 +4,8 @@
 const DEFAULT_SYSTEM_PROMPT = `You are a careful browser automation agent running inside a Chrome extension side panel.
 
 ## Core Rules
-- You control only the bound browser tab described in the context.
-- Do not ask to switch tabs. The extension keeps you bound to the original tab.
+- You control only the currently bound active browser tab described in the context.
+- Do not ask to switch tabs. The extension automatically follows the active tab and preserves a separate chat context for each tab.
 - Use tools to inspect the page before answering questions.
 - Prefer get_interactive_snapshot, then use refs for click, type_text, set_value, press_key, and scroll_to.
 - If a tool call is invalid, you will receive validation errors. Fix the tool call and try again.
@@ -63,7 +63,8 @@ const DEFAULT_SETTINGS = {
   autoAllowLocalhostNetwork: true,
   networkAllowlist: [],
   systemPrompt: "",
-  safeMode: false
+  safeMode: false,
+  planMode: false
 };
 
 const TOOL_MAP = globalThis.AGENT_TOOL_MAP || {};
@@ -93,6 +94,8 @@ function truncate(str, maxLen = 100) {
 const state = {
   boundTabId: null,
   boundTab: null,
+  activeTabId: null,
+  activeTab: null,
   messages: [],
   models: [],
   isRunning: false,
@@ -105,8 +108,12 @@ const state = {
   activePermission: null,
   planMode: false,
   safeMode: false,
-  currentPlan: null
+  currentPlan: null,
+  currentApproval: null,
+  runPromise: null
 };
+
+let tabSwitchQueue = Promise.resolve();
 
 // --- Per-tab state persistence ---
 const tabStates = {};
@@ -144,9 +151,13 @@ async function loadTabState(tabId) {
     state.sessionAllowedNetworkOrigins.clear();
     state.sessionDeniedNetworkOrigins.clear();
     state.visionFailed = false;
+    state.currentPlan = null;
+    state.currentApproval = null;
   } catch {
     state.messages = [];
     state.imagePermission = "prompt";
+    state.currentPlan = null;
+    state.currentApproval = null;
   }
 }
 
@@ -154,16 +165,24 @@ function renderChatLog() {
   dom.chatLog.innerHTML = "";
 
   for (const msg of state.messages) {
+    const content = messageContentToText(msg.content);
+
     if (msg.role === "user") {
-      addUserMessage(msg.content);
+      addUserMessage(content);
     } else if (msg.role === "assistant") {
-      addAssistantMessage(msg.content || "", []);
+      addAssistantMessage(content, Array.isArray(msg.tool_calls) ? msg.tool_calls.map((toolCall) => ({
+        name: toolCall.function?.name || toolCall.name || "unknown",
+        ok: true
+      })) : []);
     } else if (msg.role === "system") {
-      addSystem(msg.content);
+      addSystem(content, { persist: false });
+    } else if (msg.role === "error") {
+      addError(content, { persist: false });
     } else if (msg.role === "tool") {
-      // Tool results — show as tool chip only
+      if (msg.ui) addCompletedToolUi(msg.ui);
+
       const body = createMessage("tool", "Tool Result");
-      addParagraph(body, truncate(msg.content || "", 500));
+      addParagraph(body, truncate(content, 500));
     }
   }
 
@@ -191,6 +210,43 @@ function renderStatusPill() {
   pill.className = "status-pill status-pill--active";
 }
 
+function renderActiveTabInfo() {
+  const info = dom.activeTabInfo;
+  if (!info) return;
+
+  if (!state.activeTabId || !state.activeTab) {
+    info.textContent = "Active: No tab";
+    info.title = "No active tab";
+    return;
+  }
+
+  const tab = state.activeTab;
+  const label = tab.title || tab.url || `Tab ${tab.id}`;
+  info.textContent = `Active: ${truncate(label, 52)} (#${tab.id})`;
+  info.title = `${tab.title || "Untitled"}\n${tab.url || ""}\nTab ID: ${tab.id}`;
+}
+
+async function refreshActiveTabInfo() {
+  const activeTabId = await getActiveTabIdInLastNormalWindow();
+  if (!activeTabId) {
+    state.activeTabId = null;
+    state.activeTab = null;
+    renderActiveTabInfo();
+    return;
+  }
+
+  try {
+    state.activeTabId = activeTabId;
+    state.activeTab = await chrome.tabs.get(activeTabId);
+  } catch (err) {
+    devWarn(`Failed to get active tab info for tabId ${activeTabId}:`, err);
+    state.activeTabId = activeTabId;
+    state.activeTab = { id: activeTabId };
+  }
+
+  renderActiveTabInfo();
+}
+
 let settings = { ...DEFAULT_SETTINGS };
 
 const dom = {};
@@ -216,13 +272,14 @@ async function init() {
   }
 
   await bindInitialTab();
+  await refreshActiveTabInfo();
   await refreshBoundTabInfo();
   renderChatLog();
   renderStatusPill();
 
   await loadModels();
 
-  addSystem("Ready. Click the extension icon on a tab to bind the agent, or use Rebind for the current tab.");
+  addSystem("Ready. The agent follows the active tab and keeps a separate chat context for each tab.");
 }
 
 function cacheDom() {
@@ -231,6 +288,7 @@ function cacheDom() {
   dom.planModeBtn = document.getElementById("planModeBtn");
   dom.safeModeBtn = document.getElementById("safeModeBtn");
   dom.tabInfo = document.getElementById("tabInfo");
+  dom.activeTabInfo = document.getElementById("activeTabInfo");
   dom.editBtn = document.getElementById("editBtn");
   dom.rebindBtn = document.getElementById("rebindBtn");
   dom.settingsBtn = document.getElementById("settingsBtn");
@@ -326,6 +384,10 @@ function attachListeners() {
   dom.modalDeny.addEventListener("click", () => closePermission({ allow: false, scope: "session" }));
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (tabId === state.activeTabId && (changeInfo.title || changeInfo.url || changeInfo.status)) {
+      refreshActiveTabInfo().catch(() => { });
+    }
+
     if (tabId !== state.boundTabId) return;
 
     devLog("Tab updated:", tabId, changeInfo);
@@ -339,19 +401,43 @@ function attachListeners() {
   });
 
   chrome.tabs.onRemoved.addListener((tabId) => {
+    if (tabId === state.activeTabId) {
+      state.activeTabId = null;
+      state.activeTab = null;
+      renderActiveTabInfo();
+    }
+
     if (tabId === state.boundTabId) {
       devWarn("Bound tab removed:", tabId);
       state.boundTabId = null;
       state.boundTab = null;
       refreshBoundTabInfo().catch(() => { });
-      addSystem("Bound tab closed. Click Rebind to attach to another tab.");
+      addSystem("Bound tab closed. Switch to another tab to continue, or use Rebind to refresh the binding.");
     }
+  });
+
+  // Listen for tab activation directly in the panel so the bound tab follows
+  // the active tab even if the background relay message is missed.
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    devLog("tabs.onActivated:", activeInfo.tabId);
+    handleTabActivated(activeInfo.tabId).catch(() => {});
+  });
+
+  // When focus moves between windows, follow the active tab of the newly
+  // focused window.
+  chrome.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+    chrome.tabs.query({ active: true, windowId }).then((tabs) => {
+      if (tabs[0] && tabs[0].id) {
+        handleTabActivated(tabs[0].id).catch(() => {});
+      }
+    }).catch(() => {});
   });
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === "tabActivated") {
       devLog("Received tabActivated message:", message);
-      handleTabActivated(message.tabId, message.url || "").catch(() => {});
+      handleTabActivated(message.tabId, message.url || "", message.title || "").catch(() => {});
     }
   });
 }
@@ -359,11 +445,9 @@ function attachListeners() {
 async function loadSettings() {
   const stored = await chrome.storage.local.get("settings");
   settings = normalizeSettings({ ...DEFAULT_SETTINGS, ...(stored.settings || {}) });
-  // Restore mode state from persisted settings
-  if (settings.safeMode) {
-    state.safeMode = true;
-    state.planMode = true;
-  }
+  // Restore mode state from persisted settings. Safe Mode always includes Plan Mode.
+  state.safeMode = settings.safeMode;
+  state.planMode = settings.planMode || state.safeMode;
 }
 
 function normalizeSettings(input) {
@@ -392,7 +476,8 @@ function normalizeSettings(input) {
     autoAllowLocalhostNetwork: Boolean(input.autoAllowLocalhostNetwork),
     networkAllowlist,
     systemPrompt: String(input.systemPrompt || ""),
-    safeMode: Boolean(input.safeMode)
+    safeMode: Boolean(input.safeMode),
+    planMode: Boolean(input.planMode)
   };
 }
 
@@ -431,7 +516,8 @@ async function saveSettings() {
     autoAllowLocalhostNetwork: dom.autoLocalhostToggle.checked,
     networkAllowlist: dom.networkAllowlistInput.value,
     systemPrompt: dom.systemPromptInput.value,
-    safeMode: state.safeMode
+    safeMode: state.safeMode,
+    planMode: state.planMode
   };
 
   settings = normalizeSettings(formSettings);
@@ -493,63 +579,96 @@ async function getActiveTabIdInLastNormalWindow() {
 }
 
 async function onRebind() {
-  const oldTabId = state.boundTabId;
+  const targetTabId = await getActiveTabIdInLastNormalWindow();
 
-  state.boundTabId = await getActiveTabIdInLastNormalWindow();
-  devLog("Rebind requested. Old tab:", oldTabId, "New tab:", state.boundTabId);
-
-  if (state.boundTabId !== oldTabId) {
-    await saveTabState(oldTabId);
-    await loadTabState(state.boundTabId);
-    renderChatLog();
-  }
-
-  await refreshBoundTabInfo();
-  renderStatusPill();
-  await ensureBoundContentScript();
-
-  if (state.boundTabId) {
-    addSystem(`Rebound agent to tab #${state.boundTabId}.`);
-  } else {
+  if (!targetTabId) {
     addError("Could not find an active tab to bind.");
+    return;
   }
+
+  await requestTabSwitch(targetTabId, { force: true });
+  addSystem(`Rebound agent to tab #${targetTabId}.`);
 }
 
-async function handleTabActivated(newTabId, newTabUrl) {
-  if (state.isRunning) {
-    devLog("Tab activated ignored because agent is running:", newTabId);
-    return;
-  }
+async function switchBoundTab(newTabId) {
+  if (!newTabId || newTabId === state.boundTabId) return;
 
-  if (newTabId === state.boundTabId) return;
+  const oldTabId = state.boundTabId;
+  devLog("Switching bound tab from", oldTabId, "to", newTabId);
 
-  // Ignore switches to extension-owned pages (e.g. the editor tab opened
-  // by clicking the Edit button). These aren't real browsing tabs and
-  // switching to them should not reset/replace the current chat session.
-  if (newTabUrl && newTabUrl.startsWith("chrome-extension://")) {
-    devLog("Tab activated ignored because URL is chrome-extension://:", newTabUrl);
-    return;
-  }
-
-  devLog("Switching bound tab from", state.boundTabId, "to", newTabId);
-  await saveTabState(state.boundTabId);
+  // Persist the outgoing tab's conversation before swapping.
+  await saveTabState(oldTabId);
 
   state.boundTabId = newTabId;
 
+  // Load the incoming tab's saved conversation (or a fresh empty one).
   await loadTabState(newTabId);
+
+  // Refresh both indicators (bound === active now) and repaint the chat.
+  await refreshActiveTabInfo();
   await refreshBoundTabInfo();
   renderStatusPill();
   renderChatLog();
+  await ensureBoundContentScript();
+}
 
-  if (state.messages.length === 0) {
-    addSystem("Switched to new tab. Start a fresh conversation here.");
+function requestTabSwitch(newTabId, options = {}) {
+  tabSwitchQueue = tabSwitchQueue.then(async () => {
+    if (newTabId === state.boundTabId && !options.force) return;
+
+    // If the agent is mid-run, stop it and wait for it to unwind so its
+    // messages are saved to the outgoing tab before we swap.
+    if (state.isRunning) {
+      onStop();
+      try {
+        await state.runPromise;
+      } catch {
+        // ignore run errors; we still switch
+      }
+    }
+
+    await switchBoundTab(newTabId);
+  }).catch((err) => {
+    devWarn("Tab switch failed:", err);
+    addError(`Could not switch to the active tab: ${err.message || String(err)}`);
+  });
+
+  return tabSwitchQueue;
+}
+
+async function handleTabActivated(newTabId, newTabUrl = "", newTabTitle = "") {
+  if (!newTabId) return;
+
+  // Resolve URL/title so we can detect the extension's own pages.
+  let tabInfo = { id: newTabId, url: newTabUrl, title: newTabTitle };
+  if (!newTabUrl || !newTabTitle) {
+    try {
+      tabInfo = await chrome.tabs.get(newTabId);
+    } catch (err) {
+      devWarn(`Failed to read activated tab ${newTabId}:`, err);
+    }
+  }
+
+  // Ignore the extension's own pages (e.g. the editor tab opened via Edit).
+  // These are not real browsing tabs and must not steal the chat session.
+  if (tabInfo.url && tabInfo.url.startsWith("chrome-extension://")) {
+    devLog("Ignoring activation of extension page:", tabInfo.url);
+    return;
+  }
+
+  state.activeTabId = newTabId;
+  state.activeTab = tabInfo;
+  renderActiveTabInfo();
+
+  if (newTabId !== state.boundTabId) {
+    await requestTabSwitch(newTabId);
   }
 }
 
 async function refreshBoundTabInfo() {
   if (!state.boundTabId) {
     state.boundTab = null;
-    dom.tabInfo.textContent = "No bound tab";
+    dom.tabInfo.textContent = "Bound: No tab";
     renderStatusPill();
     return;
   }
@@ -559,14 +678,14 @@ async function refreshBoundTabInfo() {
     state.boundTab = tab;
 
     const label = tab.title || tab.url || `Tab ${tab.id}`;
-    dom.tabInfo.textContent = `${truncate(label, 60)} (#${tab.id})`;
+    dom.tabInfo.textContent = `Bound: ${truncate(label, 60)} (#${tab.id})`;
     dom.tabInfo.title = `${tab.url || ""}\nTab ID: ${tab.id}`;
     renderStatusPill();
   } catch (err) {
     devWarn(`Failed to get tab info for tabId ${state.boundTabId}:`, err);
     state.boundTabId = null;
     state.boundTab = null;
-    dom.tabInfo.textContent = "Bound tab closed";
+    dom.tabInfo.textContent = "Bound: Tab closed";
     renderStatusPill();
   }
 }
@@ -717,11 +836,13 @@ async function onSend() {
   if (!text || state.isRunning) return;
 
   if (!state.boundTabId) {
-    addError("No bound tab. Click Rebind to attach the agent to the current tab.");
+    addError("No active tab is available for the agent.");
     return;
   }
 
   dom.userInput.value = "";
+  state.currentPlan = null;
+  state.currentApproval = null;
   addUserMessage(text);
 
   state.messages.push({
@@ -749,18 +870,20 @@ function onStop() {
   setStatus("Stopping...");
 }
 
-function onClear() {
+async function onClear() {
   if (!confirm("Clear chat history and permissions for this session?")) return;
 
   state.messages = [];
   state.imagePermission = "prompt";
+  state.currentPlan = null;
+  state.currentApproval = null;
   state.sessionAllowedNetworkOrigins.clear();
   state.sessionDeniedNetworkOrigins.clear();
   state.visionFailed = false;
   dom.chatLog.innerHTML = "";
 
-  saveTabState(state.boundTabId);
   addSystem("Chat cleared.");
+  await saveTabState(state.boundTabId);
 }
 
 async function runAgent() {
@@ -869,6 +992,10 @@ async function runAgent() {
             content: stringifyToolResult(result)
           };
 
+          if (result && result.ui) {
+            toolMessage.ui = result.ui;
+          }
+
           if (imagePayloads.length && settings.modelSupportsVision && !state.visionFailed) {
             toolMessage.content = [
               { type: "text", text: stringifyToolResult(result) },
@@ -957,9 +1084,16 @@ async function runAgent() {
   } catch (err) {
     addError(err.message || String(err));
   } finally {
+    const completedTabId = state.boundTabId;
     setRunning(false);
     setStatus("");
-    saveTabState(state.boundTabId).catch(() => {});
+    await saveTabState(completedTabId);
+
+    const pendingTabId = state.pendingTabSwitchId;
+    state.pendingTabSwitchId = null;
+    if (pendingTabId && pendingTabId !== state.boundTabId) {
+      await requestTabSwitch(pendingTabId);
+    }
   }
 }
 
@@ -1011,7 +1145,7 @@ function buildSystemMessage() {
       `Bound tab ID: ${state.boundTabId || "unknown"}\n` +
       `Current time: ${new Date().toISOString()}\n` +
       `Active modes: Plan Mode=${state.planMode ? "ON" : "OFF"}, Safe Mode=${state.safeMode ? "ON" : "OFF"}\n\n` +
-      `Important: stay attached to this bound tab. Do not request tab switches.`
+      `Important: use only the currently bound active tab. Do not request tab switches; the extension changes the bound tab when the active browser tab changes.`
   };
 }
 
@@ -1255,21 +1389,83 @@ function convertParsedToolCall(obj, index) {
   };
 }
 
+const PLAN_GATED_TOOLS = new Set([
+  "click",
+  "type_text",
+  "set_value",
+  "press_key",
+  "scroll_to",
+  "write_browser_storage"
+]);
+
+const SAFE_MODE_APPROVAL_TOOLS = new Set([
+  "click",
+  "type_text",
+  "set_value",
+  "press_key",
+  "write_browser_storage"
+]);
+
+function requiresApprovedPlan(name) {
+  return (state.planMode || state.safeMode) && PLAN_GATED_TOOLS.has(name);
+}
+
+function requiresFreshApproval(name) {
+  return state.safeMode && SAFE_MODE_APPROVAL_TOOLS.has(name);
+}
+
 async function executeToolWithPermissions(name, args) {
   try {
+    if (requiresApprovedPlan(name) && (!state.currentPlan || state.currentPlan.approved !== true)) {
+      return {
+        ok: false,
+        error: {
+          code: "plan_required",
+          tool: name,
+          message: "Plan Mode requires an approved submit_plan before this browser action can run."
+        }
+      };
+    }
+
+    if (requiresFreshApproval(name) && (!state.currentApproval || state.currentApproval.approved !== true)) {
+      return {
+        ok: false,
+        error: {
+          code: "approval_required",
+          tool: name,
+          message: "Safe Mode requires an approved request_approval immediately before this browser action."
+        }
+      };
+    }
+
+    if (requiresFreshApproval(name)) {
+      state.currentApproval = null;
+    }
+
     if (name === "ask_user_question") {
       const response = await renderQuestionInChat(args);
-      return { ok: true, data: response };
+      return { ok: true, data: response, ui: { type: name, args, response } };
     }
 
     if (name === "request_approval") {
       const response = await renderApprovalInChat(args);
-      return { ok: true, data: response };
+      state.currentApproval = {
+        approved: response.approved === true,
+        actionType: args.actionType || "",
+        description: args.description || ""
+      };
+      return { ok: true, data: response, ui: { type: name, args, response } };
     }
 
     if (name === "submit_plan") {
       const response = await renderPlanInChat(args);
-      return { ok: true, data: response };
+      state.currentPlan = {
+        title: args.title || "Plan Overview",
+        steps: Array.isArray(args.steps) ? args.steps : [],
+        approved: response.approved === true,
+        feedback: response.feedback || ""
+      };
+      return { ok: true, data: response, ui: { type: name, args, response } };
     }
 
     if (name === "assess_page_risk") {
@@ -1481,7 +1677,7 @@ function extractImages(result) {
 
 function stringifyToolResult(result) {
   try {
-    const clean = JSON.parse(JSON.stringify(result));
+    const clean = JSON.parse(JSON.stringify(result, (key, value) => key === "ui" ? undefined : value));
     const text = JSON.stringify(clean);
 
     if (text.length > settings.maxToolResultChars) {
@@ -1540,17 +1736,24 @@ function looksLikeImageError(err) {
 
 function addUserMessage(text) {
   const body = createMessage("user", "You");
-  addParagraph(body, text);
+  addParagraph(body, messageContentToText(text));
 }
 
 function addAssistantMessage(text, validations = []) {
   const body = createMessage("assistant", "Agent");
+  const displayText = messageContentToText(text);
 
-  if (text) {
+  if (displayText) {
     if (typeof renderMarkdown === "function") {
-      body.appendChild(renderMarkdown(text));
+      try {
+        body.appendChild(renderMarkdown(displayText));
+      } catch (err) {
+        devWarn("Markdown rendering failed; displaying normalized text:", err);
+        addParagraph(body, displayText);
+      }
     } else {
-      addParagraph(body, text);
+      devWarn("Markdown renderer is unavailable; displaying normalized text.");
+      addParagraph(body, displayText);
     }
   }
 
@@ -1568,7 +1771,7 @@ function addAssistantMessage(text, validations = []) {
     body.appendChild(chips);
   }
 
-  if (!text && validations.length) {
+  if (!displayText && validations.length) {
     addParagraph(body, "Calling tools...");
   }
 }
@@ -1588,14 +1791,86 @@ function addToolResult(validation, result) {
   body.appendChild(pre);
 }
 
-function addSystem(text) {
-  const body = createMessage("system", "System");
-  addParagraph(body, text);
+function addCompletedToolUi(ui) {
+  if (!ui || !ui.type) return;
+
+  const args = ui.args || {};
+  const response = ui.response || {};
+  const body = createMessage("assistant", ui.type === "ask_user_question" ? "Clarifying Question" : ui.type === "request_approval" ? "Approval Required" : "Proposed Plan");
+  let card;
+
+  if (ui.type === "ask_user_question") {
+    card = document.createElement("div");
+    card.className = "question-card restored-ui-card";
+    const title = document.createElement("h4");
+    title.textContent = args.question || "Question";
+    card.appendChild(title);
+    const summary = document.createElement("div");
+    summary.className = "interactive-response-summary";
+    summary.textContent = `Answered: ${response.answer || "No answer provided"}`;
+    card.appendChild(summary);
+  } else if (ui.type === "request_approval") {
+    card = document.createElement("div");
+    card.className = "approval-card restored-ui-card";
+    const badge = document.createElement("span");
+    badge.className = "risk-badge";
+    badge.textContent = args.actionType || "HIGH RISK";
+    card.appendChild(badge);
+    const desc = document.createElement("span");
+    desc.style.fontWeight = "700";
+    desc.textContent = args.description || "Action approval requested.";
+    card.appendChild(desc);
+    const summary = document.createElement("div");
+    summary.className = "interactive-response-summary";
+    summary.style.background = response.approved ? "var(--green)" : "var(--danger)";
+    summary.textContent = response.approved ? "Approved" : "Rejected";
+    card.appendChild(summary);
+  } else if (ui.type === "submit_plan") {
+    card = document.createElement("div");
+    card.className = "plan-card restored-ui-card";
+    const title = document.createElement("h4");
+    title.textContent = args.title || "Plan Overview";
+    card.appendChild(title);
+    const steps = document.createElement("ol");
+    steps.className = "plan-steps-list";
+    (Array.isArray(args.steps) ? args.steps : []).forEach((step) => {
+      const item = document.createElement("li");
+      item.textContent = step;
+      steps.appendChild(item);
+    });
+    card.appendChild(steps);
+    const summary = document.createElement("div");
+    summary.className = "interactive-response-summary";
+    summary.style.background = response.approved ? "var(--green)" : "var(--danger)";
+    summary.textContent = response.approved
+      ? (response.feedback ? `Plan Approved with feedback: "${response.feedback}"` : "Plan Approved")
+      : (response.feedback ? `Plan Rejected with feedback: "${response.feedback}"` : "Plan Rejected");
+    card.appendChild(summary);
+  }
+
+  if (card) body.appendChild(card);
 }
 
-function addError(text) {
+function addSystem(text, options = {}) {
+  const displayText = messageContentToText(text);
+  const body = createMessage("system", "System");
+  addParagraph(body, displayText);
+
+  if (options.persist !== false) {
+    state.messages.push({ role: "system", content: displayText });
+    saveTabState(state.boundTabId).catch(() => {});
+  }
+}
+
+function addError(text, options = {}) {
+  const displayText = messageContentToText(text);
   const body = createMessage("error", "Error");
-  addParagraph(body, text);
+  addParagraph(body, displayText);
+
+  if (options.persist !== false) {
+    state.messages.push({ role: "error", content: displayText });
+    saveTabState(state.boundTabId).catch(() => {});
+  }
 }
 
 function createMessage(className, title) {
@@ -1669,6 +1944,8 @@ function togglePlanMode() {
     return;
   }
   state.planMode = !state.planMode;
+  settings.planMode = state.planMode;
+  chrome.storage.local.set({ settings }).catch(() => {});
   if (dom.planModeBtn) {
     dom.planModeBtn.textContent = state.planMode ? "Plan: ON" : "Plan: OFF";
     dom.planModeBtn.classList.toggle("plan-active", state.planMode);
@@ -1679,7 +1956,7 @@ function togglePlanMode() {
 function toggleSafeMode() {
   state.safeMode = !state.safeMode;
 
-  // Safe Mode forces Plan Mode on
+  // Safe Mode forces Plan Mode on and persists both mode flags.
   if (state.safeMode) {
     state.planMode = true;
   }
@@ -1694,8 +1971,8 @@ function toggleSafeMode() {
     dom.planModeBtn.disabled = state.safeMode; // lock plan mode btn when safe mode is on
   }
 
-  // Persist safe mode to settings
   settings.safeMode = state.safeMode;
+  settings.planMode = state.planMode;
   chrome.storage.local.set({ settings }).catch(() => {});
 
   addSystem(`Safe Mode ${state.safeMode ? "enabled — all guardrails enforced at maximum strictness" : "disabled"}.`);

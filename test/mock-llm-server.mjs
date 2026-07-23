@@ -214,11 +214,12 @@ function nextCompletion(body) {
   }
 
   // Step 3:
-  // Wait. This gives you time to switch tabs and verify the agent stays bound.
+  // Wait. This gives you time to switch tabs and verify that the side panel
+  // switches to the active tab's saved chat context.
   if (count === 3) {
     return assistantToolResponse(
       [toolCall("wait", { ms: 3000 }, "call_wait")],
-      "Switch tabs now if you want to test bound-tab behavior."
+      "Switch tabs now to test that the side panel follows the active tab and restores its chat context."
     );
   }
 

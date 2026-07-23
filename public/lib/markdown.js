@@ -10,10 +10,11 @@
    * Returns a DocumentFragment.
    */
   function renderMarkdown(text) {
-    if (!text) return document.createDocumentFragment();
+    const source = typeof text === "string" ? text : text == null ? "" : String(text);
+    if (!source) return document.createDocumentFragment();
 
     const fragment = document.createDocumentFragment();
-    const lines = text.split("\n");
+    const lines = source.split("\n");
 
     let i = 0;
     while (i < lines.length) {

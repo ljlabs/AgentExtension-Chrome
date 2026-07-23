@@ -138,6 +138,10 @@ body {
   text-overflow: ellipsis;
 }
 
+.active-tab-info {
+  background: var(--blue);
+}
+
 .header-actions {
   position: relative;
   display: flex;
