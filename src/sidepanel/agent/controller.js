@@ -3,7 +3,7 @@ import { performHttpRequest, isLocalOrigin, originMatchesPattern } from "../../l
 import { state, emit } from "./store.js";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./settings.js";
 import { buildSystemMessage } from "./systemPrompt.js";
-import { llmChat, fetchModels } from "./llm.js";
+import { llmChat, fetchModels, filterMessagesForLlm } from "./llm.js";
 import {
   parseAssistantResponse,
   messageContentToText
@@ -593,7 +593,7 @@ async function runAgent() {
   let apiMessages;
 
   try {
-    apiMessages = [buildSystemMessage(state, settings)].concat(state.messages);
+    apiMessages = [buildSystemMessage(state, settings)].concat(filterMessagesForLlm(state.messages));
 
     while (step < settings.maxToolSteps) {
       if (state.stopped) break;

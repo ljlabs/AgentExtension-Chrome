@@ -1,0 +1,21 @@
+{
+  "name": "Continue after a tab-switch timeout and invalid-role error",
+  "history": [
+    { "role": "user", "content": "hi" },
+    { "role": "assistant", "content": "Hello! I can help with the active browser tab." },
+    { "role": "error", "content": "LLM request timed out or was stopped." },
+    { "role": "user", "content": "continue" },
+    {
+      "role": "error",
+      "content": "LLM HTTP 400: {\"error\":{\"message\":\"Value error, role must be one of system, user, assistant, tool, or developer\",\"type\":\"invalid_request_error\"}}"
+    }
+  ],
+  "nextUserMessage": "continue after switching tabs",
+  "llmResponse": {
+    "choices": [
+      { "message": { "content": "I can continue from the active tab." } }
+    ]
+  },
+  "expectedModelRoles": ["system", "user", "assistant", "user", "user"],
+  "expectedVisibleErrorCount": 2
+}

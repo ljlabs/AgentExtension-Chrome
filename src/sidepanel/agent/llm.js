@@ -6,6 +6,10 @@ import { truncate } from "./util.js";
  * POST an OpenAI-style chat completion. `onAbortController` receives the
  * AbortController so the caller (store/controller) can cancel via Stop.
  */
+export function filterMessagesForLlm(messages) {
+  return (Array.isArray(messages) ? messages : []).filter((message) => message?.role !== "error");
+}
+
 export async function llmChat(messages, settings, onAbortController) {
   if (!settings.model) {
     throw new Error("No model selected. Open Settings and choose a model.");
@@ -27,7 +31,7 @@ export async function llmChat(messages, settings, onAbortController) {
 
     const body = {
       model: settings.model,
-      messages,
+      messages: filterMessagesForLlm(messages),
       tools: getOpenAiTools(),
       tool_choice: "auto",
       stream: false
