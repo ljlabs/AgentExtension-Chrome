@@ -33,15 +33,27 @@ describe("buildSystemMessage — default (no modes)", () => {
 });
 
 describe("buildSystemMessage — plan mode", () => {
-  it("appends the plan-mode addendum and lets the model continue after approval", () => {
+  it("includes the active plan ID and continuation instruction", () => {
     const msg = buildSystemMessage(
-      { planMode: true, safeMode: false, boundTab: {}, boundTabId: 1 },
+      {
+        planMode: true,
+        safeMode: false,
+        boundTab: {},
+        boundTabId: 1,
+        currentPlan: { approved: true, planId: "plan_123", title: "Review pension" }
+      },
       baseSettings
     );
+
+    expect(msg.content).toContain("ACTIVE APPROVED PLAN");
     expect(msg.content).toContain("PLAN MODE IS ACTIVE");
     expect(msg.content).toContain("submit_plan");
     expect(msg.content).toContain("do NOT need to ask again for each step");
+    expect(msg.content).toContain("plan_123");
+    expect(msg.content).toContain("continue_plan");
+    expect(msg.content).toContain("Do not resubmit the same plan");
   });
+
 });
 
 describe("buildSystemMessage — safe mode", () => {

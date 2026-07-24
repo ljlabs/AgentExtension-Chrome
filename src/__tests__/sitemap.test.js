@@ -48,6 +48,9 @@ describe("agent sitemap storage", () => {
       tabId: 4,
       visitCount: 2
     });
+    expect(state.sitemap[0].visits).toHaveLength(2);
+    expect(state.sitemap[0].visits[0].title).toBe("Docs");
+    expect(state.sitemap[0].visits[1].title).toBe("API Docs");
     expect(chrome.storage.local.set).toHaveBeenLastCalledWith({ agent_sitemap: state.sitemap });
   });
 

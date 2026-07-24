@@ -534,6 +534,21 @@ export const AGENT_TOOLS = [
     }
   },
   {
+    name: "continue_plan",
+    description: "Explicitly continue the currently approved plan in this new conversation turn. Use this instead of submitting the same plan again. If the user's request changes the plan's scope, submit a new plan instead.",
+    parameters: {
+      type: "object",
+      properties: {
+        planId: {
+          type: "string",
+          description: "The planId shown in the active plan context."
+        }
+      },
+      required: ["planId"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "submit_plan",
     description: "Submit a detailed, evidence-based multi-step plan for user review before executing complex operations. Never submit generic or placeholder steps. The plan must explain what will be inspected, the exact scope and targets, expected outcomes, how each result will be verified, and what risks or assumptions could change the recommendation. If a previous plan was rejected, materially revise it and explicitly map every feedback item to a change.",
     parameters: {
@@ -587,7 +602,11 @@ export const AGENT_TOOLS = [
         feedbackAddressed: {
           type: "array",
           items: { type: "string" },
-          description: "For a revision, one entry for every item of user feedback and exactly how this plan addresses it. Use an empty array for the first submission."
+          description: "For a revision, one entry for every item of user feedback and exactly how this plan addresses it. Use an empty array for the first submission or a new unrelated task."
+        },
+        revisionOfPlanId: {
+          type: "string",
+          description: "Set this to the rejected plan's planId only when this submission is a revision of that plan. Omit it for a new unrelated task."
         },
         changesFromPrevious: {
           type: "array",

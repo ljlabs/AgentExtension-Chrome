@@ -13,7 +13,7 @@ describe("AGENT_TOOLS / AGENT_TOOL_MAP", () => {
       "get_page_info", "get_html", "get_text", "get_interactive_snapshot",
       "click", "type_text", "set_value", "press_key", "scroll_to",
       "screenshot", "get_images", "http_request", "wait",
-      "ask_user_question", "request_approval", "submit_plan",
+      "ask_user_question", "request_approval", "continue_plan", "submit_plan",
       "assess_page_risk", "record_risk_assessment",
       "memories", "skills", "rules"
     ]) {

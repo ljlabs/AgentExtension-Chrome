@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import Header from "../sidepanel/components/Header.jsx";
 import SitemapDrawer from "../sidepanel/components/SitemapDrawer.jsx";
@@ -17,6 +17,11 @@ beforeEach(() => {
   state.sitemap = [];
   chrome.tabs.create.mockReset().mockResolvedValue({});
   chrome.storage.local.remove = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("Agent Sitemap UI", () => {
@@ -43,14 +48,20 @@ describe("Agent Sitemap UI", () => {
       title: "Documentation",
       tabId: 3,
       lastVisitedAt: "2025-01-01T12:00:00.000Z",
-      visitCount: 2
+      visitCount: 2,
+      visits: [
+        { visitedAt: "2025-01-01T11:00:00.000Z", tabId: 3, source: "get_page_info" },
+        { visitedAt: "2025-01-01T12:00:00.000Z", tabId: 3, source: "click" }
+      ]
     }] }} />);
 
     expect(screen.getByText("Documentation")).toBeInTheDocument();
     expect(screen.getByText("https://example.com/docs")).toBeInTheDocument();
-    expect(screen.getByText("2 visits")).toBeInTheDocument();
+    expect(screen.getByText("2×")).toBeInTheDocument();
+    expect(screen.getByText("get_page_info")).toBeInTheDocument();
+    expect(screen.getByText("click")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Documentation" }));
+    fireEvent.click(screen.getByRole("button", { name: "https://example.com/docs" }));
     expect(chrome.tabs.create).toHaveBeenCalledWith({ url: "https://example.com/docs" });
   });
 

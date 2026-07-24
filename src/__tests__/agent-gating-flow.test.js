@@ -25,6 +25,7 @@ function resetState() {
   state.safeMode = false;
   state.currentPlan = null;
   state.currentApproval = null;
+  state.planTurnAuthorized = false;
   state.autoApproveActions = false;
   state.settings = { ...DEFAULT_SETTINGS };
 }
@@ -91,16 +92,138 @@ describe("Plan Mode gating", () => {
     expect((await executeToolWithPermissions("type_text", { ref: "e2", text: "x" })).ok).toBe(true);
   });
 
-  it("a rejected plan keeps actions blocked", async () => {
-    const planPromise = executeToolWithPermissions("submit_plan", { title: "P", steps: ["s"] });
-    resolveInteraction(lastInteractiveItem().id, { approved: false, feedback: "no" });
-    await planPromise;
+  it("requires an explicit continuation on a later conversation turn", async () => {
+    state.currentPlan = {
+      planId: "plan_existing",
+      title: "Review pension",
+      steps: ["Read factsheets"],
+      approved: true,
+      feedback: ""
+    };
+    state.planTurnAuthorized = false;
 
-    const result = await executeToolWithPermissions("click", { ref: "e1" });
+    const blocked = await executeToolWithPermissions("click", { ref: "e1" });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error.code).toBe("plan_required");
+    expect(blocked.error.instruction).toContain("continue_plan");
+
+    const continued = await executeToolWithPermissions("continue_plan", { planId: "plan_existing" });
+    expect(continued.ok).toBe(true);
+    expect(state.planTurnAuthorized).toBe(true);
+    expect((await executeToolWithPermissions("click", { ref: "e1" })).ok).toBe(true);
+  });
+
+  it("rejects resubmitting an equivalent approved plan", async () => {
+    state.currentPlan = {
+      planId: "plan_active",
+      title: "Review pension",
+      objective: "Review current funds",
+      steps: ["Read factsheets", "Compare charges", "Summarize findings"],
+      verification: ["Check sources"],
+      approved: true,
+      feedback: ""
+    };
+
+    const result = await executeToolWithPermissions("submit_plan", {
+      title: "Review pension",
+      objective: "Review current funds",
+      steps: ["Read factsheets", "Compare charges", "Summarize findings"],
+      verification: ["Check sources"]
+    });
+
     expect(result.ok).toBe(false);
-    expect(result.error.code).toBe("plan_required");
+    expect(result.error.code).toBe("plan_already_active");
+    expect(result.error.instruction).toContain("continue_plan");
+  });
+
+  it("allows a changed task to replace an approved plan after fresh approval", async () => {
+    state.currentPlan = {
+      planId: "plan_old",
+      title: "Review pension",
+      steps: ["Read current fund factsheets"],
+      approved: true,
+      feedback: ""
+    };
+    state.planTurnAuthorized = false;
+
+    const planPromise = executeToolWithPermissions("submit_plan", {
+      title: "Review savings account",
+      objective: "Compare savings products",
+      steps: ["Read savings product details", "Compare charges", "Summarize differences"],
+      verification: ["Check all product charges"]
+    });
+    const card = lastInteractiveItem();
+    resolveInteraction(card.id, { approved: true, feedback: "" });
+
+    const result = await planPromise;
+    expect(result.ok).toBe(true);
+    expect(state.currentPlan.planId).not.toBe("plan_old");
+    expect(state.currentPlan.title).toBe("Review savings account");
+    expect(state.planTurnAuthorized).toBe(true);
+  });
+
+  it("requires rejected-plan feedback mapping and material changes", async () => {
+    const firstPlan = executeToolWithPermissions("submit_plan", {
+      title: "Review pension",
+      objective: "Review current funds",
+      steps: ["Read the three current fund factsheets", "Compare charges", "Summarize findings"],
+      verification: ["Check each current fund"]
+    });
+    resolveInteraction(lastInteractiveItem().id, {
+      approved: false,
+      feedback: "Review factsheets for all available funds, not just the current three."
+    });
+    await firstPlan;
+    const rejectedPlanId = state.currentPlan.planId;
+
+    const unchanged = await executeToolWithPermissions("submit_plan", {
+      title: "Review pension",
+      objective: "Review current funds",
+      steps: ["Read the three current fund factsheets", "Compare charges", "Summarize findings"],
+      verification: ["Check each current fund"],
+      revisionOfPlanId: rejectedPlanId,
+      changesFromPrevious: ["Added a note"],
+      feedbackAddressed: ["Will consider the feedback"]
+    });
+    expect(unchanged.ok).toBe(false);
+    expect(unchanged.error.code).toBe("plan_revision_required");
+
+    const revised = executeToolWithPermissions("submit_plan", {
+      title: "Review the complete pension fund range",
+      objective: "Compare current holdings with all available alternatives",
+      steps: ["Read factsheets for every available fund category", "Compare current and alternative charges", "Summarize findings"],
+      verification: ["Check current and alternative fund coverage"],
+      revisionOfPlanId: rejectedPlanId,
+      changesFromPrevious: ["Expanded factsheet review beyond the three current funds"],
+      feedbackAddressed: ["Review factsheets for all available funds, not only current holdings"]
+    });
+    resolveInteraction(lastInteractiveItem().id, { approved: true, feedback: "" });
+    expect((await revised).ok).toBe(true);
+  });
+
+  it("allows a materially different unrelated task after a rejection", async () => {
+    const rejected = executeToolWithPermissions("submit_plan", {
+      title: "Review pension",
+      objective: "Review pension funds",
+      steps: ["Read pension factsheets", "Compare charges", "Summarize findings"],
+      verification: ["Check pension sources"]
+    });
+    resolveInteraction(lastInteractiveItem().id, { approved: false, feedback: "Include all pension alternatives." });
+    await rejected;
+
+    const unrelated = executeToolWithPermissions("submit_plan", {
+      title: "Review mortgage rates",
+      objective: "Compare mortgage products",
+      steps: ["Read mortgage product details", "Compare rates", "Summarize findings"],
+      verification: ["Check mortgage sources"]
+    });
+    resolveInteraction(lastInteractiveItem().id, { approved: true, feedback: "" });
+
+    expect((await unrelated).ok).toBe(true);
+    expect(state.currentPlan.title).toBe("Review mortgage rates");
   });
 });
+
 
 describe("Safe Mode gating", () => {
   beforeEach(() => {
@@ -108,6 +231,7 @@ describe("Safe Mode gating", () => {
     state.planMode = true;
     // Pre-approve a plan so only the approval gate is exercised.
     state.currentPlan = { title: "P", steps: [], approved: true, feedback: "" };
+    state.planTurnAuthorized = true;
   });
 
   it("blocks actions without fresh approval", async () => {
@@ -192,7 +316,19 @@ describe("Stop cancels pending interactions", () => {
     const card = lastInteractiveItem();
     expect(card.pending).toBe(false);
   });
+
+  it("explicit Stop cancels active plan authorization", () => {
+    state.currentPlan = { planId: "plan_stop", title: "Task", approved: true };
+    state.planTurnAuthorized = true;
+
+    onStop();
+
+    expect(state.currentPlan).toBeNull();
+    expect(state.planTurnAuthorized).toBe(false);
+    expect(state.autoApproveActions).toBe(false);
+  });
 });
+
 
 describe("network permission for http_request", () => {
   it("auto-allows localhost by default", async () => {

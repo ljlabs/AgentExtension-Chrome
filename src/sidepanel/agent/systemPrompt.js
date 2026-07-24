@@ -50,6 +50,9 @@ export function buildSystemMessage(state, settings) {
   const routingPrompt = customPrompt ? `\n\n${BROWSER_ROUTING_PROMPT}` : "";
 
   const tab = state.boundTab || {};
+  const activePlanContext = state.currentPlan?.approved === true
+    ? `\n\n## ACTIVE APPROVED PLAN\nPlan ID: ${state.currentPlan.planId}\nPlan title: ${state.currentPlan.title || "Untitled plan"}\nThis approval belongs to the active task and persists across user messages. At the start of a new conversation turn, call 'continue_plan' with this exact planId before any gated action. If the user's request changes the plan's scope, call 'submit_plan' for a new plan instead. Do not resubmit the same plan merely because the user said continue.\n`
+    : "";
 
   // Build dynamic guardrail addendum based on active modes
   const guardrailAddendum = [];
@@ -59,9 +62,10 @@ export function buildSystemMessage(state, settings) {
       `## SAFE MODE IS ACTIVE — extra confirmation is required`,
       `The following actions are BLOCKED until you obtain approval, and calling them without approval returns an error: click, type_text, set_value, press_key, write_browser_storage.`,
       `To act safely:`,
-      `1. Inspect the page as needed, then call 'submit_plan' with a detailed evidence-based plan and WAIT — the user approves or rejects it in the chat. Include the objective, complete scope, concrete research targets, ordered steps, deliverables, verification checks, risks, and assumptions. After approval, continue with the plan.`,
+      `1. Inspect the page as needed, then call 'submit_plan' with a detailed evidence-based plan and WAIT — the user approves or rejects it in the chat. Include the objective, complete scope, concrete research targets, ordered steps, deliverables, verification checks, risks, and assumptions. After approval, continue with the plan. On later user turns, call 'continue_plan' with the active plan ID instead of submitting the same plan again.`,
       `2. Immediately BEFORE each blocked action, call 'request_approval' with actionType and a clear description. The approval is single-use and applies only to the very next action, so request approval again for each subsequent blocked action.`,
       `If the plan is rejected, do not repeat it with a footnote: map every feedback item to a material change and resubmit a visibly revised plan.`,
+      `For read-only requests such as a pension review, treat “make no changes” as a hard invariant: navigation and inspection are allowed, but never type, set values, submit forms, switch funds, save, transfer, purchase, or confirm account changes.`,
       `3. Non-page-modifying tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, assess_page_risk, wait_for_user_input) are always allowed — use them freely to inspect the page first.`
     );
   } else if (state.planMode) {
@@ -70,7 +74,8 @@ export function buildSystemMessage(state, settings) {
       `Before the FIRST page-modifying action (click, type_text, set_value, press_key, write_browser_storage), you MUST inspect the page as needed, then call 'submit_plan' and WAIT for the user to approve or reject it in the chat.`,
       `A valid plan is specific and evidence-based: state the objective, cover the complete requested scope, name concrete research/inspection targets, provide at least three ordered steps, define deliverables and success criteria, list verification checks, and disclose risks and assumptions. Do not use generic steps such as 'review the funds' or 'make a recommendation' without saying which funds/sources, what facts will be compared, and how the result will be checked.`,
       `For a rejected plan, treat the user's feedback as a hard requirement. Do not resubmit the same steps with a footnote. Address every feedback item in feedbackAddressed, list material changes in changesFromPrevious, and change the relevant objective, researchTasks, steps, deliverables, successCriteria, or verification. The tool rejects materially unchanged revisions.`,
-      `Once the plan is approved, carry it out with the action tools — you do NOT need to ask again for each step.`,
+      `For read-only requests such as a pension review, treat “make no changes” as a hard invariant: navigation and inspection are allowed, but never type, set values, submit forms, switch funds, save, transfer, purchase, or confirm account changes.`,
+      `Once the plan is approved, carry it out with the action tools — you do NOT need to ask again for each step. On a later user turn, call 'continue_plan' with the active plan ID before the next gated action; submit a new plan only when the request changes scope.`,
       `Non-page-modifying tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, wait_for_user_input) are always allowed before and during planning.`
     );
   }
@@ -82,7 +87,7 @@ export function buildSystemMessage(state, settings) {
   return {
     role: "system",
     content:
-      `${basePrompt}${routingPrompt}${addendum}\n\n` +
+      `${basePrompt}${routingPrompt}${activePlanContext}${addendum}\n\n` +
       `Bound tab title: ${tab.title || "unknown"}\n` +
       `Bound tab URL: ${tab.url || "unknown"}\n` +
       `Bound tab ID: ${state.boundTabId || "unknown"}\n` +

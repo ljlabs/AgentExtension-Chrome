@@ -29,6 +29,23 @@ function newItemId() {
   return `item_${nextItemId++}`;
 }
 
+function newPlanId() {
+  return `plan_${newItemId()}`;
+}
+
+function hasPendingInteraction() {
+  return [...interactionResolvers.keys()].some((interactionId) => {
+    const item = state.chatItems.find((entry) => entry.id === interactionId);
+    return item?.pending === true;
+  });
+}
+
+function getPendingInteractionsForStorage() {
+  return state.chatItems
+    .filter((item) => item.kind === "interactive" && item.pending)
+    .map((item) => ({ ...item }));
+}
+
 function normalizePlanPart(value) {
   if (Array.isArray(value)) {
     return value.map((part) => normalizePlanPart(part)).filter(Boolean);
@@ -69,7 +86,7 @@ function planRevisionInstruction(feedback, previousPlan) {
     previousSteps.length
       ? `The rejected plan's steps were: ${JSON.stringify(previousSteps)}`
       : "There was no usable step list in the rejected plan.",
-    "Before calling submit_plan again, make the revised scope visibly different and use feedbackAddressed and changesFromPrevious to explain the changes."
+    "Before calling submit_plan again, set revisionOfPlanId to the rejected plan's planId, make the revised scope visibly different, and use feedbackAddressed and changesFromPrevious to explain the changes."
   ].join("\n");
 }
 
@@ -222,6 +239,21 @@ function rebuildChatItems() {
     }
   }
 
+  for (const item of state.restoredPendingInteractions || []) {
+    const interactionId = item.interactionId || item.id;
+    const canResume = interactionResolvers.has(interactionId);
+    state.chatItems.push({
+      ...item,
+      id: item.id || interactionId,
+      interactionId,
+      pending: canResume,
+      response: canResume
+        ? null
+        : { cancelled: true, approved: false, answer: "This interaction can no longer be resumed." }
+    });
+  }
+  state.restoredPendingInteractions = [];
+
   emit();
 }
 
@@ -250,7 +282,13 @@ async function saveTabState(tabId) {
     await chrome.storage.session.set({
       [getTabStateKey(tabId)]: {
         messages: state.messages,
-        imagePermission: state.imagePermission
+        imagePermission: state.imagePermission,
+        currentPlan: state.currentPlan,
+        currentApproval: state.currentApproval,
+        autoApproveActions: state.autoApproveActions,
+        planTurnAuthorized: state.paused && state.pausedTabId === tabId && state.planTurnAuthorized === true,
+        paused: state.paused && state.pausedTabId === tabId,
+        pendingInteractions: getPendingInteractionsForStorage()
       }
     });
   } catch {
@@ -266,20 +304,42 @@ async function loadTabState(tabId) {
     if (stored[key]) {
       state.messages = stored[key].messages || [];
       state.imagePermission = stored[key].imagePermission || "prompt";
+      state.currentPlan = stored[key].currentPlan || null;
+      state.currentApproval = stored[key].currentApproval || null;
+      state.autoApproveActions = stored[key].autoApproveActions === true;
+      state.paused = stored[key].paused === true;
+      if (state.paused) state.pausedTabId = tabId;
+      else if (state.pausedTabId === tabId) state.pausedTabId = null;
+      state.planTurnAuthorized = state.paused && stored[key].planTurnAuthorized === true;
+      state.restoredPendingInteractions = Array.isArray(stored[key].pendingInteractions)
+        ? stored[key].pendingInteractions
+        : [];
     } else {
       state.messages = [];
       state.imagePermission = "prompt";
+      state.currentPlan = null;
+      state.currentApproval = null;
+      state.autoApproveActions = false;
+      state.paused = false;
+      state.restoredPendingInteractions = [];
+      if (state.pausedTabId === tabId) state.pausedTabId = null;
     }
+    if (!state.paused) state.planTurnAuthorized = false;
+    state.planApproved = state.currentPlan?.approved === true;
     state.sessionAllowedNetworkOrigins.clear();
     state.sessionDeniedNetworkOrigins.clear();
     state.visionFailed = false;
-    state.currentPlan = null;
-    state.currentApproval = null;
   } catch {
     state.messages = [];
     state.imagePermission = "prompt";
     state.currentPlan = null;
     state.currentApproval = null;
+    state.autoApproveActions = false;
+    state.planTurnAuthorized = false;
+    state.planApproved = false;
+    state.paused = false;
+    state.restoredPendingInteractions = [];
+    if (state.pausedTabId === tabId) state.pausedTabId = null;
   }
 }
 
@@ -398,18 +458,31 @@ async function switchBoundTab(newTabId) {
   await ensureBoundContentScript();
 }
 
+function pauseForTabSwitch() {
+  state.paused = true;
+  state.pausedTabId = state.boundTabId;
+  setStatus("Paused — return to this tab to continue.");
+}
+
 function requestTabSwitch(newTabId, options = {}) {
   tabSwitchQueue = tabSwitchQueue.then(async () => {
     if (newTabId === state.boundTabId && !options.force) return;
 
-    // If the agent is mid-run, stop it and wait for it to unwind so its
-    // messages are saved to the outgoing tab before we swap.
-    if (state.isRunning) {
-      onStop({ reason: "tab-switch" });
-      try {
-        await state.runPromise;
-      } catch {
-        // ignore run errors; we still switch
+    // A pending interactive card is a resumable checkpoint. Leave its
+    // resolver and run alive, persist the card, and switch tabs without
+    // converting it into a cancellation.
+    if (state.isRunning && !state.pausedTabId) {
+      if (hasPendingInteraction()) {
+        pauseForTabSwitch();
+      } else {
+        // If the model is between interactions, abort the request safely. The
+        // approved plan itself remains persisted so a later Continue can use it.
+        onStop({ reason: "tab-switch" });
+        try {
+          await state.runPromise;
+        } catch {
+          // ignore run errors; we still switch
+        }
       }
     }
 
@@ -576,8 +649,8 @@ export async function onSend(text) {
     return;
   }
 
-  state.currentPlan = null;
   state.currentApproval = null;
+  state.planTurnAuthorized = false;
   addUserMessage(trimmed);
 
   state.messages.push({
@@ -597,6 +670,16 @@ export async function onSend(text) {
 export function onStop(options = {}) {
   stopReason = options.reason === "tab-switch" ? "tab-switch" : "user";
   state.stopped = true;
+
+  if (stopReason === "user") {
+    state.currentPlan = null;
+    state.currentApproval = null;
+    state.planApproved = false;
+    state.planTurnAuthorized = false;
+    state.autoApproveActions = false;
+    state.paused = false;
+    state.pausedTabId = null;
+  }
 
   if (state.abortController) {
     state.abortController.abort();
@@ -638,7 +721,12 @@ export async function onClear() {
   state.imagePermission = "prompt";
   state.currentPlan = null;
   state.currentApproval = null;
-  state.sessionAllowedNetworkOrigins.clear();
+  state.planTurnAuthorized = false;
+  state.planApproved = false;
+  state.autoApproveActions = false;
+  state.paused = false;
+  state.pausedTabId = null;
+  state.restoredPendingInteractions = [];
   state.sessionDeniedNetworkOrigins.clear();
   state.visionFailed = false;
   state.chatItems = [];
@@ -784,14 +872,17 @@ async function runAgent() {
           // tool call after seeing only a JSON rejection payload.
           if (validation.name === "submit_plan" && (
             result?.data?.revisionRequired === true ||
-            result?.error?.code === "plan_revision_required"
+            result?.error?.code === "plan_revision_required" ||
+            result?.error?.code === "plan_already_active"
           )) {
             apiMessages.push({
               role: "user",
-              content: planRevisionInstruction(
-                result?.data?.feedback || result?.error?.feedback || "",
-                result?.data?.previousPlan || result?.error?.previousPlan
-              )
+              content: result?.error?.code === "plan_already_active"
+                ? result.error.instruction
+                : planRevisionInstruction(
+                  result?.data?.feedback || result?.error?.feedback || "",
+                  result?.data?.previousPlan || result?.error?.previousPlan
+                )
             });
           }
         }
@@ -919,6 +1010,13 @@ export function resolveInteraction(interactionId, response) {
     item.pending = false;
     item.response = response;
   }
+
+  if (state.paused && state.pausedTabId === state.boundTabId) {
+    state.paused = false;
+    state.pausedTabId = null;
+    setStatus("");
+  }
+
   emit();
 
   resolve(response);
@@ -986,14 +1084,65 @@ export function closePermission(response) {
 
 export async function executeToolWithPermissions(name, args) {
   try {
-    if (requiresApprovedPlan(name, state) && (!state.currentPlan || state.currentPlan.approved !== true)) {
+    if (name === "continue_plan") {
+      const activePlan = state.currentPlan;
+      if (!activePlan || activePlan.approved !== true) {
+        return {
+          ok: false,
+          error: {
+            code: "plan_required",
+            tool: name,
+            message: "There is no approved plan available to continue.",
+            instruction: "Submit a new plan with submit_plan and wait for the user to approve it."
+          }
+        };
+      }
+
+      if (args.planId !== activePlan.planId) {
+        return {
+          ok: false,
+          error: {
+            code: "plan_mismatch",
+            tool: name,
+            message: "The requested plan ID does not match the active approved plan.",
+            activePlanId: activePlan.planId,
+            instruction: "Use the active plan ID from the system context, or submit a new plan if the task has changed."
+          }
+        };
+      }
+
+      state.planTurnAuthorized = true;
+      state.paused = false;
+      state.pausedTabId = null;
+      emit();
+      return {
+        ok: true,
+        data: {
+          continued: true,
+          planId: activePlan.planId,
+          title: activePlan.title,
+          nextStep: activePlan.nextStep || null
+        }
+      };
+    }
+
+    if (requiresApprovedPlan(name, state) && (
+      !state.currentPlan ||
+      state.currentPlan.approved !== true ||
+      state.planTurnAuthorized !== true
+    )) {
+      const hasApprovedPlan = state.currentPlan?.approved === true;
       return {
         ok: false,
         error: {
           code: "plan_required",
           tool: name,
-          message: `Plan Mode is ON, so "${name}" is blocked until a plan is approved.`,
-          instruction: "Call the 'submit_plan' tool now with a title and an ordered list of steps, then wait for the user to approve it. After approval, call this tool again."
+          message: hasApprovedPlan
+            ? `An approved plan exists, but this conversation turn must explicitly continue it before "${name}".`
+            : `Plan Mode is ON, so "${name}" is blocked until a plan is approved.`,
+          instruction: hasApprovedPlan
+            ? `Call 'continue_plan' with planId "${state.currentPlan.planId}" to continue the approved plan, or call 'submit_plan' if the user's request changes its scope.`
+            : "Call the 'submit_plan' tool now with a title and an ordered list of steps, then wait for the user to approve it. After approval, call this tool again."
         }
       };
     }
@@ -1075,6 +1224,20 @@ export async function executeToolWithPermissions(name, args) {
     }
 
     if (name === "submit_plan") {
+      const activePlan = state.currentPlan?.approved === true ? state.currentPlan : null;
+      if (activePlan && !hasMaterialPlanRevision(activePlan, args)) {
+        return {
+          ok: false,
+          error: {
+            code: "plan_already_active",
+            tool: name,
+            message: "An equivalent plan is already approved and active.",
+            activePlanId: activePlan.planId,
+            instruction: `Call 'continue_plan' with planId "${activePlan.planId}" instead of submitting the same plan again. Submit a new plan only if the user's request changes scope.`
+          }
+        };
+      }
+
       const previousPlan = state.currentPlan?.approved === false ? state.currentPlan : null;
       const feedbackAddressed = Array.isArray(args.feedbackAddressed)
         ? args.feedbackAddressed.filter((item) => typeof item === "string" && item.trim())
@@ -1082,20 +1245,27 @@ export async function executeToolWithPermissions(name, args) {
       const changesFromPrevious = Array.isArray(args.changesFromPrevious)
         ? args.changesFromPrevious.filter((item) => typeof item === "string" && item.trim())
         : [];
+      const revisionOfPlanId = typeof args.revisionOfPlanId === "string" ? args.revisionOfPlanId.trim() : "";
+      const isExplicitRevision = Boolean(previousPlan && revisionOfPlanId && revisionOfPlanId === previousPlan.planId);
       const revisionIsMaterial = previousPlan && hasMaterialPlanRevision(previousPlan, args);
       const revisionExplainsChanges = changesFromPrevious.length > 0;
       const revisionMapsFeedback = !previousPlan?.feedback || feedbackAddressed.length > 0;
+      const isUnchangedWithoutRevisionId = previousPlan && !isExplicitRevision && !revisionIsMaterial;
+      const isInvalidExplicitRevision = previousPlan && isExplicitRevision && (
+        !revisionIsMaterial || !revisionExplainsChanges || !revisionMapsFeedback
+      );
 
-      if (previousPlan && (!revisionIsMaterial || !revisionExplainsChanges || !revisionMapsFeedback)) {
+      if (isUnchangedWithoutRevisionId || isInvalidExplicitRevision) {
         const feedback = previousPlan.feedback || "";
         return {
           ok: false,
           error: {
             code: "plan_revision_required",
             tool: name,
-            message: "The revised plan must materially change the rejected plan and explicitly address the user's feedback.",
+            message: "The revised plan must materially change the rejected plan and explicitly address the user's feedback. Omit revisionOfPlanId for a new unrelated task.",
             feedback,
             previousPlan: {
+              planId: previousPlan.planId,
               title: previousPlan.title,
               steps: previousPlan.steps
             },
@@ -1104,18 +1274,24 @@ export async function executeToolWithPermissions(name, args) {
         };
       }
 
-      const response = await pushInteractive("submit_plan", args);
+      const planArgs = {
+        ...args,
+        planId: args.planId || newPlanId()
+      };
+      const response = await pushInteractive("submit_plan", planArgs);
       const approved = response.approved === true;
       const feedback = typeof response.feedback === "string" ? response.feedback.trim() : "";
 
       state.currentPlan = {
-        ...args,
-        title: args.title || "Plan Overview",
-        steps: Array.isArray(args.steps) ? args.steps : [],
+        ...planArgs,
+        title: planArgs.title || "Plan Overview",
+        steps: Array.isArray(planArgs.steps) ? planArgs.steps : [],
         approved,
         feedback,
         revisionRequired: !approved
       };
+      state.planApproved = approved;
+      state.planTurnAuthorized = approved;
       // Auto-approval is enabled only for an explicitly approved plan that
       // requested it. A later plan without the option turns it off.
       state.autoApproveActions = approved && response.autoApprove === true;
@@ -1129,14 +1305,14 @@ export async function executeToolWithPermissions(name, args) {
         revisionRequired: !approved,
         ...(approved ? {} : {
           previousPlan: {
-            title: args.title || "Plan Overview",
-            steps: Array.isArray(args.steps) ? args.steps : []
+            title: planArgs.title || "Plan Overview",
+            steps: Array.isArray(planArgs.steps) ? planArgs.steps : []
           },
-          instruction: planRevisionInstruction(feedback, args)
+          instruction: planRevisionInstruction(feedback, planArgs)
         })
       };
 
-      return { ok: true, data, ui: { type: name, args, response } };
+      return { ok: true, data, ui: { type: name, args: planArgs, response } };
     }
 
     if (name === "assess_page_risk") {

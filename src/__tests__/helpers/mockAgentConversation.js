@@ -19,6 +19,7 @@ export function resetAgentConversationState(initialState = {}) {
   state.safeMode = initialState.safeMode === true;
   state.currentPlan = null;
   state.currentApproval = null;
+  state.planTurnAuthorized = false;
   state.autoApproveActions = false;
   state.settings = { ...DEFAULT_SETTINGS };
 }
