@@ -1,0 +1,1 @@
+1. When an agent clicks a button that opens a new tab, we need a subagent to continue the investigation and return a report. sometimes pdf's are opened and we need to review it then return a report too. once completed close the new tab, which should return us to the previous tab and continue the investigation automagically
