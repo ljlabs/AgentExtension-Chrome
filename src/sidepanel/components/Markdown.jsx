@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
+import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -132,7 +133,7 @@ export default function Markdown({ text }) {
   return (
     <div className="markdown-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks, remarkObsidian]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks, remarkFrontmatter, remarkObsidian]}
         rehypePlugins={[rehypeKatex, [rehypeSanitize, sanitizeSchema]]}
         components={components}
         skipHtml
