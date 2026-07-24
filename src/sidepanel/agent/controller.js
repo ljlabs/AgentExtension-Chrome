@@ -15,7 +15,7 @@ import {
   stripImages,
   looksLikeImageError
 } from "./images.js";
-import { requiresApprovedPlan, requiresFreshApproval } from "./gating.js";
+import { requiresApprovedPlan, requiresFreshApproval, isExplorationClick } from "./gating.js";
 import { sendMessageWithTimeout } from "./messaging.js";
 import { devLog, devGroup, devGroupEnd, devWarn, truncate } from "./util.js";
 import { loadSitemap, recordVisitedUrl } from "./sitemap.js";
@@ -1084,6 +1084,18 @@ export function closePermission(response) {
 
 export async function executeToolWithPermissions(name, args) {
   try {
+    // In Plan Mode, an unapproved click is discovery by definition. Mark it
+    // as exploration before dispatch so the content script can apply its
+    // independent risky-target protection. Safe Mode never takes this path.
+    if (
+      name === "click" &&
+      state.planMode &&
+      state.safeMode !== true &&
+      state.currentPlan?.approved !== true
+    ) {
+      args = { ...(args || {}), exploration: true };
+    }
+
     if (name === "continue_plan") {
       const activePlan = state.currentPlan;
       if (!activePlan || activePlan.approved !== true) {
@@ -1126,7 +1138,7 @@ export async function executeToolWithPermissions(name, args) {
       };
     }
 
-    if (requiresApprovedPlan(name, state) && (
+    if (requiresApprovedPlan(name, state) && !isExplorationClick(name, args, state) && (
       !state.currentPlan ||
       state.currentPlan.approved !== true ||
       state.planTurnAuthorized !== true

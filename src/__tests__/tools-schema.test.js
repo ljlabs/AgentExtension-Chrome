@@ -80,6 +80,17 @@ describe("validateToolCall", () => {
     expect(validation.ok).toBe(false);
   });
 
+  it("accepts a click marked for pre-plan exploration", () => {
+    const validation = validateToolCall({
+      id: "call_explore",
+      type: "function",
+      function: { name: "click", arguments: JSON.stringify({ ref: "e5", exploration: true }) }
+    }, 0);
+
+    expect(validation.ok).toBe(true);
+    expect(validation.args.exploration).toBe(true);
+  });
+
   it("accepts a click with a ref target (target requirement enforced at runtime, not schema)", () => {
     const validation = validateToolCall({
       id: "call_4",

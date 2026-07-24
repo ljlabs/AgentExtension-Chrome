@@ -62,6 +62,7 @@ export function buildSystemMessage(state, settings) {
       `## SAFE MODE IS ACTIVE — extra confirmation is required`,
       `The following actions are BLOCKED until you obtain approval, and calling them without approval returns an error: click, type_text, set_value, press_key, write_browser_storage.`,
       `To act safely:`,
+      `Safe Mode does not permit exploratory clicks before approval; use the non-page-modifying inspection tools, submit the detailed plan, then obtain the required approval.`,
       `1. Inspect the page as needed, then call 'submit_plan' with a detailed evidence-based plan and WAIT — the user approves or rejects it in the chat. Include the objective, complete scope, concrete research targets, ordered steps, deliverables, verification checks, risks, and assumptions. After approval, continue with the plan. On later user turns, call 'continue_plan' with the active plan ID instead of submitting the same plan again.`,
       `2. Immediately BEFORE each blocked action, call 'request_approval' with actionType and a clear description. The approval is single-use and applies only to the very next action, so request approval again for each subsequent blocked action.`,
       `If the plan is rejected, do not repeat it with a footnote: map every feedback item to a material change and resubmit a visibly revised plan.`,
@@ -70,8 +71,8 @@ export function buildSystemMessage(state, settings) {
     );
   } else if (state.planMode) {
     guardrailAddendum.push(
-      `## PLAN MODE IS ACTIVE — create a detailed plan before acting`,
-      `Before the FIRST page-modifying action (click, type_text, set_value, press_key, write_browser_storage), you MUST inspect the page as needed, then call 'submit_plan' and WAIT for the user to approve or reject it in the chat.`,
+      `## PLAN MODE IS ACTIVE — discover first, then create one detailed plan`,
+      `Before an approved plan exists, use read-only tools freely and use click only for safe navigation or opening read-only information. In this phase the controller automatically treats every click as an exploration click (equivalent to setting exploration:true), and the content script blocks risky targets. Do not type, set values, press keys, write storage, submit, save, confirm, switch funds, transfer, purchase, or make account changes during discovery. Do not submit speculative plans; gather enough evidence first, then call 'submit_plan' once with the detailed plan and wait for approval.`,
       `A valid plan is specific and evidence-based: state the objective, cover the complete requested scope, name concrete research/inspection targets, provide at least three ordered steps, define deliverables and success criteria, list verification checks, and disclose risks and assumptions. Do not use generic steps such as 'review the funds' or 'make a recommendation' without saying which funds/sources, what facts will be compared, and how the result will be checked.`,
       `For a rejected plan, treat the user's feedback as a hard requirement. Do not resubmit the same steps with a footnote. Address every feedback item in feedbackAddressed, list material changes in changesFromPrevious, and change the relevant objective, researchTasks, steps, deliverables, successCriteria, or verification. The tool rejects materially unchanged revisions.`,
       `For read-only requests such as a pension review, treat “make no changes” as a hard invariant: navigation and inspection are allowed, but never type, set values, submit forms, switch funds, save, transfer, purchase, or confirm account changes.`,

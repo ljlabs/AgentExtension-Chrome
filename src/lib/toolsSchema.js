@@ -111,7 +111,7 @@ export const AGENT_TOOLS = [
   },
   {
     name: "click",
-    description: "Click an element in the bound tab. Provide a target: \"ref\" from get_interactive_snapshot (preferred), or a \"selector\", or \"xpath\".",
+    description: "Click an element in the bound tab. Provide a target: \"ref\" from get_interactive_snapshot (preferred), or a \"selector\", or \"xpath\". Before an approved plan, set exploration:true only for safe read-only navigation clicks used to discover the page; never use it for a submit, save, confirm, transfer, purchase, switch, or account-changing control.",
     parameters: {
       type: "object",
       properties: {
@@ -126,6 +126,11 @@ export const AGENT_TOOLS = [
           type: "boolean",
           default: false,
           description: "Click even if the element appears disabled."
+        },
+        exploration: {
+          type: "boolean",
+          default: false,
+          description: "Set true only during pre-plan discovery to navigate through read-only pages. This does not permit typing, submitting, saving, switching funds, transfers, purchases, or other account changes; risky targets are rejected."
         }
       },
       additionalProperties: false

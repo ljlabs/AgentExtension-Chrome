@@ -16,6 +16,14 @@ export const SAFE_MODE_APPROVAL_TOOLS = new Set([
   "write_browser_storage"
 ]);
 
+export function isExplorationClick(name, args, { planMode, safeMode, currentPlan }) {
+  return name === "click" &&
+    args?.exploration === true &&
+    planMode === true &&
+    safeMode !== true &&
+    currentPlan?.approved !== true;
+}
+
 export function requiresApprovedPlan(name, { planMode, safeMode }) {
   return (planMode || safeMode) && PLAN_GATED_TOOLS.has(name);
 }

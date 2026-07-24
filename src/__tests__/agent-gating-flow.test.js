@@ -58,11 +58,18 @@ describe("Plan Mode gating", () => {
     state.planMode = true;
   });
 
-  it("blocks click with an actionable plan_required error", async () => {
+  it("automatically treats an unmarked pre-plan click as exploration", async () => {
     const result = await executeToolWithPermissions("click", { ref: "e1" });
-    expect(result.ok).toBe(false);
-    expect(result.error.code).toBe("plan_required");
-    expect(result.error.instruction).toContain("submit_plan");
+    expect(result.ok).toBe(true);
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "executeTool",
+        tool: "click",
+        args: expect.objectContaining({ ref: "e1", exploration: true }),
+        tabId: 1
+      }),
+      expect.any(Function)
+    );
   });
 
   it("never gates read-only tools", async () => {
@@ -72,6 +79,14 @@ describe("Plan Mode gating", () => {
     }
   });
 
+  it("allows explicitly marked safe exploration clicks before a plan", async () => {
+    const result = await executeToolWithPermissions("click", { ref: "e1", exploration: true });
+    expect(result.ok).toBe(true);
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "executeTool", tool: "click", tabId: 1 }),
+      expect.any(Function)
+    );
+  });
   it("submit_plan approval unblocks actions for the whole plan", async () => {
     // Model submits a plan → interactive card appears → user approves.
     const planPromise = executeToolWithPermissions("submit_plan", {
@@ -233,13 +248,22 @@ describe("Safe Mode gating", () => {
     state.currentPlan = { title: "P", steps: [], approved: true, feedback: "" };
     state.planTurnAuthorized = true;
   });
-
   it("blocks actions without fresh approval", async () => {
     const result = await executeToolWithPermissions("click", { ref: "e1" });
     expect(result.ok).toBe(false);
     expect(result.error.code).toBe("approval_required");
     expect(result.error.instruction).toContain("request_approval");
   });
+
+  it("does not allow exploration clicks before a plan in Safe Mode", async () => {
+    state.currentPlan = null;
+    state.planTurnAuthorized = false;
+
+    const result = await executeToolWithPermissions("click", { ref: "e1", exploration: true });
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe("plan_required");
+  });
+
 
   it("approval is single-use: first action passes, second is blocked again", async () => {
     const approvalPromise = executeToolWithPermissions("request_approval", {

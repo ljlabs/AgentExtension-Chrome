@@ -435,8 +435,27 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
     };
   }
 
+  function isExplorationRiskyTarget(el) {
+    if (el.getAttribute && el.getAttribute("data-llm-agent-risk") === "high") return true;
+
+    const tag = el.tagName ? el.tagName.toLowerCase() : "";
+    const type = (el.getAttribute && el.getAttribute("type") || "").toLowerCase();
+    const text = String(getAccessibleText(el) || "").trim();
+    const riskyText = /\b(submit|save|confirm|transfer|switch|withdraw|deposit|purchase|buy|pay|enrol|enroll|trade|delete|remove|update|change)\b/i;
+
+    if ((tag === "input" && type === "submit") || (tag === "button" && el.closest("form") && type !== "button")) {
+      return true;
+    }
+
+    return riskyText.test(text);
+  }
+
   async function clickTool(args) {
     const el = resolveTarget(args);
+
+    if (args.exploration && isExplorationRiskyTarget(el)) {
+      throw new Error("Exploration click blocked: this target may submit, save, confirm, or change account data. Submit and obtain approval for a detailed plan first.");
+    }
 
     if (el.disabled && !args.force) {
       throw new Error("Element is disabled. Use force:true to click anyway.");

@@ -45,8 +45,9 @@ describe("buildSystemMessage — plan mode", () => {
       baseSettings
     );
 
-    expect(msg.content).toContain("ACTIVE APPROVED PLAN");
     expect(msg.content).toContain("PLAN MODE IS ACTIVE");
+    expect(msg.content).toContain("exploration:true");
+    expect(msg.content).toContain("Do not submit speculative plans");
     expect(msg.content).toContain("submit_plan");
     expect(msg.content).toContain("do NOT need to ask again for each step");
     expect(msg.content).toContain("plan_123");

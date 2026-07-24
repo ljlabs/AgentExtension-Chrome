@@ -28,6 +28,10 @@ describe("interactive snapshot changes", () => {
       right: 100,
       bottom: 30
     });
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn()
+    });
     chrome.runtime.onMessage.addListener = vi.fn((listener) => {
       pageToolListener = listener;
     });
@@ -36,6 +40,20 @@ describe("interactive snapshot changes", () => {
     await import("../content/index.js?interactive-diff");
   });
 
+  it("allows read-only exploration clicks but blocks risky controls", async () => {
+    document.body.innerHTML = '<button id="save">Save</button><button id="view">View details</button>';
+
+    const snapshot = await mockAgentToolCall("get_interactive_snapshot");
+    const saveRef = snapshot.data.elements.find((element) => element.id === "save").ref;
+    const viewRef = snapshot.data.elements.find((element) => element.id === "view").ref;
+
+    const blocked = await mockAgentToolCall("click", { ref: saveRef, exploration: true });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toContain("Exploration click blocked");
+
+    const allowed = await mockAgentToolCall("click", { ref: viewRef, exploration: true });
+    expect(allowed.ok).toBe(true);
+  });
   it("returns a Git-style diff once, then no changes when checked again", async () => {
     const initial = await mockAgentToolCall("get_interactive_snapshot");
 
