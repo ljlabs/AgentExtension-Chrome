@@ -1,173 +1,144 @@
-/**
- * Declarative markdown renderer for chat bubbles. Returns React elements —
- * no innerHTML, no refs, no effects — so it renders identically for live
- * messages and transcripts restored on tab switch.
- *
- * Supports: headings, code fences, inline code, bold, italic, links,
- * ordered/unordered lists, blockquotes, horizontal rules, paragraphs.
- */
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import "katex/dist/katex.min.css";
 
-const INLINE_RE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+const CALLOUT_RE = /^\[!([\w-]+)\]([+-])?(?:\s+(.*))?$/i;
+const SAFE_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 
-function renderInline(text) {
-  const parts = [];
-  let lastIndex = 0;
-  let match;
-  let key = 0;
-
-  INLINE_RE.lastIndex = 0;
-  while ((match = INLINE_RE.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-
-    const token = match[0];
-
-    if (token.startsWith("`")) {
-      parts.push(<code key={key++}>{token.slice(1, -1)}</code>);
-    } else if (token.startsWith("**")) {
-      parts.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith("*")) {
-      parts.push(<em key={key++}>{token.slice(1, -1)}</em>);
-    } else if (token.startsWith("[")) {
-      const linkMatch = token.match(/\[([^\]]+)\]\(([^)]+)\)/);
-      if (linkMatch) {
-        parts.push(
-          <a key={key++} href={linkMatch[2]} target="_blank" rel="noopener noreferrer">
-            {linkMatch[1]}
-          </a>
-        );
-      } else {
-        parts.push(token);
-      }
-    }
-
-    lastIndex = match.index + token.length;
+function safeUrl(value) {
+  if (!value || /[\u0000-\u0020]/.test(value) && /^\s*(?:javascript|vbscript|data):/i.test(value)) {
+    return null;
   }
 
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
+  if (/^(?:#|\/|\.\.?\/)/.test(value)) return value;
 
-  return parts;
+  try {
+    const url = new URL(value, "https://markdown.invalid/");
+    return SAFE_PROTOCOLS.has(url.protocol) ? value : null;
+  } catch {
+    return null;
+  }
 }
 
-function renderBlocks(source, keyPrefix = "") {
-  const blocks = [];
-  const lines = source.split("\n");
-  let i = 0;
-  let key = 0;
-
-  const nextKey = () => `${keyPrefix}${key++}`;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Code block (```)
-    if (line.trimStart().startsWith("```")) {
-      const codeLines = [];
-      i++;
-      while (i < lines.length && !lines[i].trimStart().startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing ```
-      blocks.push(
-        <pre key={nextKey()}>
-          <code>{codeLines.join("\n")}</code>
-        </pre>
-      );
-      continue;
-    }
-
-    // Horizontal rule
-    if (/^(\s*[-*_]\s*){3,}$/.test(line)) {
-      blocks.push(<hr key={nextKey()} />);
-      i++;
-      continue;
-    }
-
-    // Heading
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
-    if (headingMatch) {
-      const H = `h${headingMatch[1].length}`;
-      blocks.push(<H key={nextKey()}>{renderInline(headingMatch[2])}</H>);
-      i++;
-      continue;
-    }
-
-    // Blockquote
-    if (line.startsWith("> ")) {
-      const quoteLines = [];
-      while (i < lines.length && lines[i].startsWith("> ")) {
-        quoteLines.push(lines[i].slice(2));
-        i++;
-      }
-      blocks.push(
-        <blockquote key={nextKey()}>
-          {renderBlocks(quoteLines.join("\n"), `${keyPrefix}q${key}-`)}
-        </blockquote>
-      );
-      continue;
-    }
-
-    // Unordered list
-    if (/^(\s*)([-*+])\s+(.+)/.test(line)) {
-      const items = [];
-      while (i < lines.length) {
-        const m = lines[i].match(/^(\s*)([-*+])\s+(.+)/);
-        if (!m) break;
-        items.push(<li key={items.length}>{renderInline(m[3])}</li>);
-        i++;
-      }
-      blocks.push(<ul key={nextKey()}>{items}</ul>);
-      continue;
-    }
-
-    // Ordered list
-    if (/^(\s*)(\d+)\.\s+(.+)/.test(line)) {
-      const items = [];
-      while (i < lines.length) {
-        const m = lines[i].match(/^(\s*)(\d+)\.\s+(.+)/);
-        if (!m) break;
-        items.push(<li key={items.length}>{renderInline(m[3])}</li>);
-        i++;
-      }
-      blocks.push(<ol key={nextKey()}>{items}</ol>);
-      continue;
-    }
-
-    // Empty line
-    if (line.trim() === "") {
-      i++;
-      continue;
-    }
-
-    // Paragraph — consume consecutive non-special lines
-    const paraLines = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() !== "" &&
-      !lines[i].trimStart().startsWith("```") &&
-      !lines[i].startsWith("> ") &&
-      !/^#{1,6}\s/.test(lines[i]) &&
-      !/^(\s*)([-*+])\s+/.test(lines[i]) &&
-      !/^(\s*)(\d+)\.\s+/.test(lines[i])
-    ) {
-      paraLines.push(lines[i]);
-      i++;
-    }
-    if (paraLines.length) {
-      blocks.push(<p key={nextKey()}>{renderInline(paraLines.join("\n"))}</p>);
-    }
-  }
-
-  return blocks;
+function addNodeData(node, name, value) {
+  node.data ||= {};
+  node.data[name] = value;
 }
+
+function splitTextNode(node, pattern, createNode) {
+  const match = pattern.exec(node.value);
+  if (!match) return [node];
+
+  const result = [];
+  let offset = 0;
+  do {
+    if (match.index > offset) result.push({ type: "text", value: node.value.slice(offset, match.index) });
+    result.push(createNode(match));
+    offset = match.index + match[0].length;
+  } while ((pattern.lastIndex = offset, pattern.exec(node.value)));
+  if (offset < node.value.length) result.push({ type: "text", value: node.value.slice(offset) });
+  pattern.lastIndex = 0;
+  return result;
+}
+
+function transformObsidianSyntax(tree) {
+  const visit = (node, parent) => {
+    if (node.type === "html") {
+      node.type = "text";
+    }
+
+    if (node.type === "blockquote" && node.children?.[0]?.type === "paragraph") {
+      const firstText = node.children[0].children?.[0];
+      const match = firstText?.type === "text" && firstText.value.match(CALLOUT_RE);
+      if (match) {
+        addNodeData(node, "hName", "aside");
+        addNodeData(node, "hProperties", {
+          className: [`markdown-callout`, `markdown-callout-${match[1].toLowerCase()}`],
+          "data-callout": match[1].toLowerCase()
+        });
+        firstText.value = match[3] || "";
+        if (!firstText.value) node.children[0].children.shift();
+      }
+    }
+
+    if (node.type === "text" && parent?.type !== "code" && parent?.type !== "inlineCode") {
+      let nodes = [node];
+      nodes = nodes.flatMap((item) => splitTextNode(item, /%%[\s\S]*?%%/g, () => ({ type: "text", value: "" })));
+      nodes = nodes.flatMap((item) => splitTextNode(item, /==([^=]+)==/g, (match) => ({
+        type: "highlight", value: match[1], data: { hName: "mark" }
+      })));
+      nodes = nodes.flatMap((item) => splitTextNode(item, /!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (match) => ({
+        type: "embed", value: match[2] || match[1], data: { hName: "span", hProperties: { className: ["markdown-embed"], title: match[1] } }
+      })));
+      nodes = nodes.flatMap((item) => splitTextNode(item, /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (match) => ({
+        type: "link", title: null, url: `#${encodeURIComponent(match[1])}`, children: [{ type: "text", value: match[2] || match[1] }], data: { hProperties: { className: ["markdown-wikilink"] } }
+      })));
+      nodes = nodes.flatMap((item) => splitTextNode(item, /(^|[^\w])#([\w-]+(?:\/[-\w]+)*)/g, (match) => ({
+        type: "tag", value: match[0], data: { hName: "span", hProperties: { className: ["markdown-tag"] } }
+      })));
+      if (nodes.length !== 1 || nodes[0] !== node) {
+        const index = parent.children.indexOf(node);
+        parent.children.splice(index, 1, ...nodes);
+        return;
+      }
+    }
+
+    node.children?.forEach((child) => visit(child, node));
+  };
+  tree.children?.forEach((child) => visit(child, tree));
+}
+
+function remarkObsidian() {
+  return transformObsidianSyntax;
+}
+
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": [...(defaultSchema.attributes["*"] || []), "className", "title"],
+    aside: ["className", "data-callout"],
+    span: ["className", "title"]
+  }
+};
+
+function Link({ href, children, ...props }) {
+  const url = safeUrl(href);
+  if (!url) return <span className="markdown-unsafe-link">{children}</span>;
+  const external = /^(?:https?|mailto|tel):/i.test(url);
+  return <a {...props} href={url} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined}>{children}</a>;
+}
+
+function Image({ src, alt, ...props }) {
+  const url = safeUrl(src);
+  return url ? <img {...props} src={url} alt={alt || ""} loading="lazy" /> : <span className="markdown-embed">{alt || src}</span>;
+}
+
+const components = {
+  a: Link,
+  img: Image,
+  input: ({ type, checked, ...props }) => <input {...props} type={type} checked={checked} readOnly />,
+  pre: ({ children, ...props }) => <pre {...props}>{children}</pre>
+};
 
 export default function Markdown({ text }) {
   const source = typeof text === "string" ? text : text == null ? "" : String(text);
   if (!source) return null;
 
-  return <div className="markdown-body">{renderBlocks(source)}</div>;
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks, remarkObsidian]}
+        rehypePlugins={[rehypeKatex, [rehypeSanitize, sanitizeSchema]]}
+        components={components}
+        skipHtml
+      >
+        {source}
+      </ReactMarkdown>
+    </div>
+  );
 }
