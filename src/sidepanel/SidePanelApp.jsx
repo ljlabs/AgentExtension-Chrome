@@ -8,6 +8,7 @@ import {
 } from "./agent/controller.js";
 import Header from "./components/Header.jsx";
 import SettingsDrawer from "./components/SettingsDrawer.jsx";
+import SitemapDrawer from "./components/SitemapDrawer.jsx";
 import ChatLog from "./components/ChatLog.jsx";
 import StatusBar from "./components/StatusBar.jsx";
 import Composer from "./components/Composer.jsx";
@@ -16,6 +17,7 @@ import PermissionModal from "./components/PermissionModal.jsx";
 export default function SidePanelApp() {
   const snapshot = useAgentStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sitemapOpen, setSitemapOpen] = useState(false);
 
   useEffect(() => {
     if (typeof chrome === "undefined" || !chrome.tabs) return undefined;
@@ -67,8 +69,10 @@ export default function SidePanelApp() {
       <Header
         snapshot={snapshot}
         onToggleSettings={() => setSettingsOpen((open) => !open)}
+        onToggleSitemap={() => setSitemapOpen((open) => !open)}
       />
       {settingsOpen && <SettingsDrawer snapshot={snapshot} />}
+      {sitemapOpen && <SitemapDrawer snapshot={snapshot} />}
       <ChatLog items={snapshot.chatItems} />
       <StatusBar text={snapshot.statusText} />
       <Composer isRunning={snapshot.isRunning} />

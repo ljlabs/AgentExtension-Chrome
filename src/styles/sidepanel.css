@@ -677,3 +677,76 @@ pre {
   color: var(--ink);
   margin-right: 6px;
 }
+
+.sitemap-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.sitemap-heading h2 {
+  margin-bottom: 2px;
+}
+
+.sitemap-summary {
+  margin: 0 0 12px;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.sitemap-empty {
+  padding: 14px;
+  border: 3px dashed var(--ink);
+  background: var(--blue);
+  font-weight: 700;
+}
+
+.sitemap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sitemap-entry {
+  padding: 10px;
+  border: 3px solid var(--ink);
+  background: #fff;
+  box-shadow: 3px 3px 0 0 var(--ink);
+}
+
+.sitemap-entry-main {
+  min-width: 0;
+}
+
+.sitemap-title {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  text-align: left;
+  text-decoration: underline;
+}
+
+.sitemap-url {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.sitemap-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 800;
+}

@@ -34,7 +34,7 @@ function tabInfoLabel(tab, prefix, maxLen) {
   return `${prefix}: ${truncate(label, maxLen)} (#${tab.id})`;
 }
 
-export default function Header({ snapshot, onToggleSettings }) {
+export default function Header({ snapshot, onToggleSettings, onToggleSitemap }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -124,6 +124,9 @@ export default function Header({ snapshot, onToggleSettings }) {
             </button>
             <button id="settingsBtn" className="btn small menu-item" type="button" onClick={closeMenuAnd(onToggleSettings)}>
               Settings
+            </button>
+            <button id="sitemapBtn" className="btn small menu-item" type="button" onClick={closeMenuAnd(onToggleSitemap)}>
+              Agent Sitemap
             </button>
             <button id="clearBtn" className="btn small danger menu-item" type="button" onClick={closeMenuAnd(onClear)}>
               Clear

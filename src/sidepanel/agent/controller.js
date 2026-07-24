@@ -18,6 +18,7 @@ import {
 import { requiresApprovedPlan, requiresFreshApproval } from "./gating.js";
 import { sendMessageWithTimeout } from "./messaging.js";
 import { devLog, devGroup, devGroupEnd, devWarn, truncate } from "./util.js";
+import { loadSitemap, recordVisitedUrl } from "./sitemap.js";
 
 let tabSwitchQueue = Promise.resolve();
 let nextItemId = 1;
@@ -122,6 +123,26 @@ function addCompletedToolUi(ui) {
     pending: false,
     response: ui.response || {}
   });
+}
+
+function recordToolVisitedUrls(toolName, result) {
+  if (!result?.ok || toolName === "http_request" || !result.data || typeof result.data !== "object") return;
+
+  const data = result.data;
+  const candidates = [];
+  if (typeof data.url === "string") candidates.push({ url: data.url, title: data.title });
+  if (toolName === "click") {
+    if (typeof data.beforeUrl === "string") candidates.push({ url: data.beforeUrl, title: data.beforeTitle });
+    if (typeof data.afterUrl === "string") candidates.push({ url: data.afterUrl, title: data.afterTitle });
+  }
+
+  for (const candidate of candidates) {
+    recordVisitedUrl(candidate.url, {
+      title: candidate.title,
+      tabId: state.boundTabId,
+      source: toolName
+    }).catch(() => {});
+  }
 }
 
 export function addSystem(text, options = {}) {
@@ -722,6 +743,7 @@ async function runAgent() {
           }
 
           devLog(`Tool result: ${validation.name}`, { ok: result?.ok, data: result?.data ? JSON.stringify(result.data).slice(0, 300) : result?.error });
+          recordToolVisitedUrls(validation.name, result);
 
           const imagePayloads = extractImages(result);
 
@@ -1293,6 +1315,7 @@ export async function initController() {
   initialized = true;
 
   await loadSettings();
+  await loadSitemap();
   await bindInitialTab();
   await refreshActiveTabInfo();
   await refreshBoundTabInfo();

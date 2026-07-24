@@ -31,7 +31,8 @@ export const state = {
   autoApproveActions: false,
   runPromise: null,
   statusText: "",
-  settings: null
+  settings: null,
+  sitemap: []
 };
 
 const listeners = new Set();
@@ -53,7 +54,8 @@ function buildSnapshot() {
     planApproved: state.planApproved,
     autoApproveActions: state.autoApproveActions,
     statusText: state.statusText,
-    settings: state.settings
+    settings: state.settings,
+    sitemap: [...state.sitemap]
   };
 }
 
