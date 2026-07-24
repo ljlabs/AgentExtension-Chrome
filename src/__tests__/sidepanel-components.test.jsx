@@ -189,6 +189,24 @@ describe("PlanCard", () => {
     spy.mockRestore();
   });
 
+  it("resolves the auto-approve option with the opt-in flag", () => {
+    const spy = vi.spyOn(controller, "resolveInteraction").mockImplementation(() => {});
+
+    render(<PlanCard item={{
+      id: "p-auto",
+      pending: true,
+      args: { title: "Search plan", steps: ["Type query", "Submit search"] }
+    }} />);
+
+    fireEvent.click(screen.getByText("Approve & Auto-approve Actions"));
+    expect(spy).toHaveBeenCalledWith("p-auto", {
+      approved: true,
+      feedback: "",
+      autoApprove: true
+    });
+    spy.mockRestore();
+  });
+
   it("renders completed approved state with feedback", () => {
     render(<PlanCard item={{
       id: "p2",

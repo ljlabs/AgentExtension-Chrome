@@ -25,6 +25,7 @@ function resetState() {
   state.safeMode = false;
   state.currentPlan = null;
   state.currentApproval = null;
+  state.autoApproveActions = false;
   state.settings = { ...DEFAULT_SETTINGS };
 }
 

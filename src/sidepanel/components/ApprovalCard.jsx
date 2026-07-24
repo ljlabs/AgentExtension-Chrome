@@ -5,6 +5,7 @@ export default function ApprovalCard({ item }) {
 
   if (!item.pending) {
     const response = item.response || {};
+    const isAutoApproved = response.autoApproved === true;
     return (
       <div className="approval-card restored-ui-card">
         <span className="risk-badge">{args.actionType || "HIGH RISK"}</span>
@@ -13,7 +14,7 @@ export default function ApprovalCard({ item }) {
           className="interactive-response-summary"
           style={{ background: response.approved ? "var(--green)" : "var(--danger)" }}
         >
-          {response.approved ? "Approved" : "Rejected"}
+          {isAutoApproved ? "Auto-Approved (by plan)" : (response.approved ? "Approved" : "Rejected")}
         </div>
       </div>
     );

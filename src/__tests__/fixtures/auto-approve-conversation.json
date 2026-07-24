@@ -1,0 +1,79 @@
+{
+  "name": "Google weather search with plan auto-approval",
+  "initialState": {
+    "boundTabId": 1,
+    "planMode": true,
+    "safeMode": true
+  },
+  "turns": [
+    {
+      "role": "assistant",
+      "tool": "submit_plan",
+      "args": {
+        "title": "Search Google for weather today",
+        "steps": [
+          "Type 'weather today' into the Google search box",
+          "Click the Google Search button to execute the search"
+        ]
+      },
+      "userResponse": {
+        "approved": true,
+        "feedback": "",
+        "autoApprove": true
+      },
+      "expect": {
+        "ok": true,
+        "autoApproveActions": true
+      }
+    },
+    {
+      "role": "user",
+      "content": "Search Google for the weather today"
+    },
+    {
+      "role": "assistant",
+      "tool": "type_text",
+      "args": {
+        "ref": "e8",
+        "text": "weather today",
+        "clear": false,
+        "pressEnter": false,
+        "force": false
+      },
+      "expect": {
+        "ok": true,
+        "pendingApprovalCards": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "tool": "click",
+      "args": {
+        "ref": "e12",
+        "force": false,
+        "waitAfterMs": 350
+      },
+      "expect": {
+        "ok": true,
+        "pendingApprovalCards": 0
+      }
+    },
+    {
+      "role": "user",
+      "content": "Now perform another browser action without asking me again"
+    },
+    {
+      "role": "assistant",
+      "tool": "request_approval",
+      "args": {
+        "actionType": "click",
+        "description": "Click the next safe browser control"
+      },
+      "expect": {
+        "ok": true,
+        "autoApproved": true,
+        "pendingApprovalCards": 0
+      }
+    }
+  ]
+}

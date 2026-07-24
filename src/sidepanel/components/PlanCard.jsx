@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { resolveInteraction } from "../agent/controller.js";
 
-function summaryText(approved, feedback) {
+function summaryText(approved, feedback, autoApprove) {
   if (approved) {
-    return feedback ? `Plan Approved with feedback: "${feedback}"` : "Plan Approved";
+    let text = feedback ? `Plan Approved with feedback: "${feedback}"` : "Plan Approved";
+    if (autoApprove) text += " (auto-approving actions)";
+    return text;
   }
   return feedback ? `Plan Rejected with feedback: "${feedback}"` : "Plan Rejected";
 }
@@ -25,14 +27,16 @@ export default function PlanCard({ item }) {
           className="interactive-response-summary"
           style={{ background: response.approved ? "var(--green)" : "var(--danger)" }}
         >
-          {summaryText(response.approved, response.feedback)}
+          {summaryText(response.approved, response.feedback, response.autoApprove)}
         </div>
       </div>
     );
   }
 
-  const finish = (approved) => {
-    resolveInteraction(item.id, { approved, feedback: feedback.trim() });
+  const finish = (approved, shouldAutoApprove) => {
+    const response = { approved, feedback: feedback.trim() };
+    if (shouldAutoApprove) response.autoApprove = true;
+    resolveInteraction(item.id, response);
   };
 
   return (
@@ -50,9 +54,10 @@ export default function PlanCard({ item }) {
         value={feedback}
         onChange={(event) => setFeedback(event.target.value)}
       />
-      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button className="btn primary small" type="button" onClick={() => finish(true)}>Approve Plan</button>
-        <button className="btn danger small" type="button" onClick={() => finish(false)}>Reject</button>
+      <div style={{ display: "flex", gap: 4, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="btn primary small" type="button" onClick={() => finish(true, false)}>Approve Plan</button>
+        <button className="btn primary small" type="button" style={{ backgroundColor: "var(--blue-accent)" }} onClick={() => finish(true, true)}>Approve & Auto-approve Actions</button>
+        <button className="btn danger small" type="button" onClick={() => finish(false, false)}>Reject</button>
       </div>
     </div>
   );

@@ -80,6 +80,11 @@ describe("gating", () => {
     expect(requiresFreshApproval("scroll_to", { safeMode: true })).toBe(false);
   });
 
+  it("auto-approved plan actions do not require fresh approval", () => {
+    expect(requiresFreshApproval("click", { safeMode: true, autoApproveActions: true })).toBe(false);
+    expect(requiresFreshApproval("type_text", { safeMode: true, autoApproveActions: true })).toBe(false);
+  });
+
   it("PLAN_GATED_TOOLS covers the write actions but not read-only scroll_to", () => {
     for (const tool of ["click", "type_text", "set_value", "press_key", "write_browser_storage"]) {
       expect(PLAN_GATED_TOOLS.has(tool)).toBe(true);

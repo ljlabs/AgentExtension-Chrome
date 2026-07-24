@@ -27,6 +27,8 @@ export const state = {
   safeMode: false,
   currentPlan: null,
   currentApproval: null,
+  planApproved: false,
+  autoApproveActions: false,
   runPromise: null,
   statusText: "",
   settings: null
@@ -48,6 +50,8 @@ function buildSnapshot() {
     activePermission: state.activePermission,
     planMode: state.planMode,
     safeMode: state.safeMode,
+    planApproved: state.planApproved,
+    autoApproveActions: state.autoApproveActions,
     statusText: state.statusText,
     settings: state.settings
   };

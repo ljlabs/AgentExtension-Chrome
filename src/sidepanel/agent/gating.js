@@ -20,6 +20,6 @@ export function requiresApprovedPlan(name, { planMode, safeMode }) {
   return (planMode || safeMode) && PLAN_GATED_TOOLS.has(name);
 }
 
-export function requiresFreshApproval(name, { safeMode }) {
-  return safeMode && SAFE_MODE_APPROVAL_TOOLS.has(name);
+export function requiresFreshApproval(name, { safeMode, autoApproveActions }) {
+  return safeMode && !autoApproveActions && SAFE_MODE_APPROVAL_TOOLS.has(name);
 }

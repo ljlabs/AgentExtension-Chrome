@@ -922,6 +922,32 @@ export async function executeToolWithPermissions(name, args) {
     }
 
     if (name === "request_approval") {
+      // If auto-approve is active, automatically approve
+      if (state.autoApproveActions) {
+        const autoApprovedResponse = {
+          approved: true,
+          autoApproved: true,
+          actionType: args.actionType || "",
+          description: args.description || ""
+        };
+        state.currentApproval = {
+          approved: true,
+          actionType: args.actionType || "",
+          description: args.description || ""
+        };
+        // Add a UI notification that it was auto-approved
+        addCompletedToolUi({
+          type: "request_approval",
+          args,
+          response: autoApprovedResponse
+        });
+        return {
+          ok: true,
+          data: autoApprovedResponse,
+          ui: { type: "request_approval", args, response: autoApprovedResponse }
+        };
+      }
+
       const response = await pushInteractive("request_approval", args);
       state.currentApproval = {
         approved: response.approved === true,
@@ -939,6 +965,11 @@ export async function executeToolWithPermissions(name, args) {
         approved: response.approved === true,
         feedback: response.feedback || ""
       };
+      // Auto-approval is enabled only for an explicitly approved plan that
+      // requested it. A later plan without the option turns it off.
+      state.autoApproveActions = response.approved === true && response.autoApprove === true;
+      state.currentApproval = null;
+      emit();
       return { ok: true, data: response, ui: { type: name, args, response } };
     }
 
@@ -1067,6 +1098,11 @@ export function toggleSafeMode() {
   chrome.storage.local.set({ settings: state.settings }).catch(() => {});
 
   addSystem(`Safe Mode ${state.safeMode ? "enabled — all guardrails enforced at maximum strictness" : "disabled"}.`);
+}
+
+export function setAutoApproveActions(autoApprove) {
+  state.autoApproveActions = autoApprove;
+  emit();
 }
 
 // --- Menu actions ---
