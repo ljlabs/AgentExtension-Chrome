@@ -22,6 +22,10 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
     "label[for]"
   ].join(", ");
 
+  let lastInteractiveSnapshot = null;
+  let lastInteractiveSnapshotOptions = null;
+  let nextInteractiveRef = 1;
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.type !== "PAGE_TOOL") return;
 
@@ -50,6 +54,9 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
 
       case "get_interactive_snapshot":
         return getInteractiveSnapshot(args);
+
+      case "get_changes_since_last_interactive_snapshot":
+        return getChangesSinceLastInteractiveSnapshot();
 
       case "click":
         return await clickTool(args);
@@ -280,31 +287,45 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
     document.querySelectorAll("[data-llm-agent-ref]").forEach((el) => {
       el.removeAttribute("data-llm-agent-ref");
     });
+    nextInteractiveRef = 1;
   }
 
-  function getInteractiveSnapshot(args) {
+  function normalizeSnapshotOptions(args = {}) {
+    return {
+      selector: args.selector || DEFAULT_INTERACTIVE_SELECTOR,
+      includeHidden: Boolean(args.includeHidden),
+      maxElements: Math.min(Math.max(Number.parseInt(args.maxElements, 10) || 200, 1), 500)
+    };
+  }
+
+  function getInteractiveSnapshot(args = {}) {
     clearRefs();
+    const options = normalizeSnapshotOptions(args);
+    const snapshot = collectInteractiveSnapshot(options, false);
+    lastInteractiveSnapshot = snapshot;
+    lastInteractiveSnapshotOptions = options;
+    return snapshot;
+  }
 
-    const selector = args.selector || DEFAULT_INTERACTIVE_SELECTOR;
-    const includeHidden = Boolean(args.includeHidden);
-    const maxElements = Math.min(Math.max(Number.parseInt(args.maxElements, 10) || 200, 1), 500);
-
+  function collectInteractiveSnapshot(options, preserveRefs) {
     let candidates;
     try {
-      candidates = Array.from(document.querySelectorAll(selector));
+      candidates = Array.from(document.querySelectorAll(options.selector));
     } catch (err) {
       throw new Error(`Invalid snapshot selector: ${err.message}`);
     }
 
     const elements = [];
-    let counter = 1;
 
     for (const el of candidates) {
-      if (elements.length >= maxElements) break;
-      if (!includeHidden && !isVisible(el)) continue;
+      if (elements.length >= options.maxElements) break;
+      if (!options.includeHidden && !isVisible(el)) continue;
 
-      const ref = `e${counter++}`;
-      el.setAttribute("data-llm-agent-ref", ref);
+      let ref = preserveRefs && el.getAttribute("data-llm-agent-ref");
+      if (!ref) {
+        ref = `e${nextInteractiveRef++}`;
+        el.setAttribute("data-llm-agent-ref", ref);
+      }
 
       const rect = el.getBoundingClientRect();
       const tag = el.tagName ? el.tagName.toLowerCase() : "";
@@ -348,7 +369,69 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
       title: document.title,
       count: elements.length,
       elements,
-      hint: "Use refs with click, type_text, set_value, press_key, and scroll_to. Call get_interactive_snapshot again after page changes."
+      hint: "Use refs with click, type_text, set_value, press_key, and scroll_to. Action results include UI changes; call get_changes_since_last_interactive_snapshot when needed."
+    };
+  }
+
+  function getChangesSinceLastInteractiveSnapshot() {
+    if (!lastInteractiveSnapshot) {
+      return fullSnapshotChange("no_previous_snapshot", getInteractiveSnapshot({}));
+    }
+
+    if (lastInteractiveSnapshot.url !== location.href) {
+      return fullSnapshotChange(
+        "url_changed",
+        getInteractiveSnapshot(lastInteractiveSnapshotOptions || {})
+      );
+    }
+
+    const current = collectInteractiveSnapshot(lastInteractiveSnapshotOptions, true);
+    const previous = lastInteractiveSnapshot;
+    const previousByRef = new Map(previous.elements.map((element) => [element.ref, element]));
+    const currentByRef = new Map(current.elements.map((element) => [element.ref, element]));
+
+    const added = current.elements.filter((element) => !previousByRef.has(element.ref));
+    const removed = previous.elements.filter((element) => !currentByRef.has(element.ref));
+    const changed = current.elements
+      .filter((element) => previousByRef.has(element.ref))
+      .map((element) => ({ before: previousByRef.get(element.ref), after: element }))
+      .filter(({ before, after }) => JSON.stringify(before) !== JSON.stringify(after));
+
+    const diffLines = [];
+    if (previous.title !== current.title) {
+      diffLines.push(`- title: ${JSON.stringify(previous.title)}`);
+      diffLines.push(`+ title: ${JSON.stringify(current.title)}`);
+    }
+    for (const element of removed) diffLines.push(`- ${JSON.stringify(element)}`);
+    for (const { before, after } of changed) {
+      diffLines.push(`- ${JSON.stringify(before)}`);
+      diffLines.push(`+ ${JSON.stringify(after)}`);
+    }
+    for (const element of added) diffLines.push(`+ ${JSON.stringify(element)}`);
+
+    lastInteractiveSnapshot = current;
+
+    return {
+      type: "diff",
+      format: "git",
+      diff: diffLines.join("\n"),
+      url: current.url,
+      title: current.title,
+      previousTitle: previous.title,
+      count: current.count,
+      added,
+      removed,
+      changed,
+      unchangedCount: current.count - added.length - changed.length,
+      hint: "Apply added and changed elements to the previous snapshot; removed refs are no longer available. The diff uses Git-style '-' removals and '+' additions."
+    };
+  }
+
+  function fullSnapshotChange(reason, snapshot) {
+    return {
+      type: "full_snapshot",
+      reason,
+      ...snapshot
     };
   }
 
@@ -385,7 +468,8 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
       beforeTitle,
       afterUrl: location.href,
       afterTitle: document.title,
-      navigated: beforeUrl !== location.href
+      navigated: beforeUrl !== location.href,
+      changes: getChangesSinceLastInteractiveSnapshot()
     };
   }
 
@@ -660,16 +744,19 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
     };
   }
 
-  function scrollToTool(args) {
+  async function scrollToTool(args) {
     const behavior = args.behavior === "smooth" ? "smooth" : "auto";
 
     if (hasTargetArgs(args)) {
       const el = resolveTarget(args);
       el.scrollIntoView({ behavior, block: "center", inline: "center" });
 
+      if (behavior === "smooth") await sleep(100);
+
       return {
         scrolledToElement: true,
-        tag: el.tagName ? el.tagName.toLowerCase() : ""
+        tag: el.tagName ? el.tagName.toLowerCase() : "",
+        changes: getChangesSinceLastInteractiveSnapshot()
       };
     }
 
@@ -677,11 +764,13 @@ if (!window.__LOCAL_LLM_AGENT_CONTENT__) {
     const y = Number.parseInt(args.y, 10) || 0;
 
     window.scrollTo({ left: x, top: y, behavior });
+    if (behavior === "smooth") await sleep(100);
 
     return {
       scrolledToCoordinates: true,
       x,
-      y
+      y,
+      changes: getChangesSinceLastInteractiveSnapshot()
     };
   }
 

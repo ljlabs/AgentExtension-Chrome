@@ -101,6 +101,15 @@ export const AGENT_TOOLS = [
     }
   },
   {
+    name: "get_changes_since_last_interactive_snapshot",
+    description: "Return a Git-style diff of interactive UI changes since the last snapshot or change check. If the URL changed or no baseline exists, returns a full interactive snapshot instead.",
+    parameters: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    }
+  },
+  {
     name: "click",
     description: "Click an element in the bound tab. Provide a target: \"ref\" from get_interactive_snapshot (preferred), or a \"selector\", or \"xpath\".",
     parameters: {

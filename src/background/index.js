@@ -671,17 +671,25 @@ async function clickTool(tabId, args) {
     }
 
     if (after.status === "loading" || after.url !== beforeUrl) {
-      return {
-        ok: true,
-        data: {
-          clicked: true,
-          navigated: true,
-          url: after.url,
-          title: after.title,
-          status: after.status,
-          note: "Click likely caused navigation. The content-script response was lost, but the bound tab updated."
-        }
+      const snapshot = await sendPageTool(tabId, "get_interactive_snapshot", {}, true);
+      const data = {
+        clicked: true,
+        navigated: true,
+        url: after.url,
+        title: after.title,
+        status: after.status,
+        note: "Click likely caused navigation. The content-script response was lost, but the bound tab updated."
       };
+
+      if (snapshot.ok) {
+        data.changes = {
+          type: "full_snapshot",
+          reason: "url_changed",
+          ...snapshot.data
+        };
+      }
+
+      return { ok: true, data };
     }
 
     return {
