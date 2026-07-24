@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemMessage, DEFAULT_SYSTEM_PROMPT } from "../sidepanel/agent/systemPrompt.js";
+import { buildSystemMessage } from "../sidepanel/agent/systemPrompt.js";
 
 const baseSettings = { systemPrompt: "" };
 
@@ -16,15 +16,19 @@ describe("buildSystemMessage — default (no modes)", () => {
     // Action-first framing.
     expect(msg.content).toContain("Bias toward ACTION");
     expect(msg.content).toContain("get_interactive_snapshot");
+    expect(msg.content).toContain("Browser-first tool routing (mandatory)");
+    expect(msg.content).toContain("Do NOT use http_request to read the bound page");
   });
 
-  it("uses a custom system prompt when provided", () => {
+  it("keeps browser-first routing when a custom system prompt is provided", () => {
     const msg = buildSystemMessage(
       { planMode: false, safeMode: false, boundTab: {}, boundTabId: 1 },
       { systemPrompt: "Custom instructions here." }
     );
     expect(msg.content).toContain("Custom instructions here.");
-    expect(msg.content).not.toContain(DEFAULT_SYSTEM_PROMPT.slice(0, 40));
+    expect(msg.content).not.toContain("You are a browser automation agent running inside a Chrome extension side panel.");
+    expect(msg.content).toContain("Browser-first tool routing (mandatory)");
+    expect(msg.content).toContain("When browser tools and http_request could both accomplish a task, prefer the browser tools");
   });
 });
 

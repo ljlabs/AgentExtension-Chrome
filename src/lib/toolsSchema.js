@@ -223,7 +223,7 @@ export const AGENT_TOOLS = [
   },
   {
     name: "http_request",
-    description: "Make an HTTP request. Use for APIs or fetching other web pages. Only http/https allowed. Network permission may be requested.",
+    description: "Make a raw HTTP request only when the user explicitly asks for an external API, raw HTTP operation, or resource that is not the bound page. Do not use this to read or operate the bound page; use browser tools for that. Only http/https allowed. Network permission may be requested.",
     requiresNetworkPermission: true,
     parameters: {
       type: "object",

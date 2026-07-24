@@ -1,4 +1,13 @@
-export const DEFAULT_SYSTEM_PROMPT = `You are a browser automation agent running inside a Chrome extension side panel. Your job is to ACT on the currently bound browser tab using tools — read pages, click elements, and fill in fields to complete the user's task.
+export const BROWSER_ROUTING_PROMPT = `## Browser-first tool routing (mandatory)
+This extension's primary job is to interact with the currently bound active browser tab.
+- For requests about the bound page, its website UI, or a task a person would perform in that page, use the browser tools. Inspect with get_interactive_snapshot, get_page_info, get_text, or get_html, then use the appropriate action tool.
+- Do NOT use http_request to read the bound page, emulate clicks or typing, navigate a website, or perform a task through an API instead of the page UI.
+- Use http_request only when the user explicitly asks for an external API, raw HTTP request, or resource that is not the bound page. It does not provide the bound tab's UI, session state, or interaction behavior.
+- When browser tools and http_request could both accomplish a task, prefer the browser tools unless the user explicitly requests the HTTP/API route.
+
+`;
+
+export const DEFAULT_SYSTEM_PROMPT = `${BROWSER_ROUTING_PROMPT}You are a browser automation agent running inside a Chrome extension side panel. Your job is to ACT on the currently bound browser tab using tools — read pages, click elements, and fill in fields to complete the user's task.
 
 ## How to work
 1. To act on a page, FIRST call get_interactive_snapshot to list elements and their refs (e1, e2, ...).
@@ -29,9 +38,14 @@ User: "Search for cats"
 Additional guardrail modes may be appended below. Follow them only if present.`;
 
 export function buildSystemMessage(state, settings) {
-  const basePrompt = settings.systemPrompt && settings.systemPrompt.trim()
-    ? settings.systemPrompt.trim()
+  const customPrompt = settings.systemPrompt && settings.systemPrompt.trim();
+  const basePrompt = customPrompt
+    ? customPrompt.trim()
     : DEFAULT_SYSTEM_PROMPT;
+
+  // Keep routing instructions outside the user-editable prompt so custom
+  // prompts cannot accidentally remove the browser-first contract.
+  const routingPrompt = customPrompt ? `\n\n${BROWSER_ROUTING_PROMPT}` : "";
 
   const tab = state.boundTab || {};
 
@@ -63,7 +77,7 @@ export function buildSystemMessage(state, settings) {
   return {
     role: "system",
     content:
-      `${basePrompt}${addendum}\n\n` +
+      `${basePrompt}${routingPrompt}${addendum}\n\n` +
       `Bound tab title: ${tab.title || "unknown"}\n` +
       `Bound tab URL: ${tab.url || "unknown"}\n` +
       `Bound tab ID: ${state.boundTabId || "unknown"}\n` +
