@@ -535,25 +535,71 @@ export const AGENT_TOOLS = [
   },
   {
     name: "submit_plan",
-    description: "Submit a multi-step plan for user review and approval before executing complex operations.",
+    description: "Submit a detailed, evidence-based multi-step plan for user review before executing complex operations. Never submit generic or placeholder steps. The plan must explain what will be inspected, the exact scope and targets, expected outcomes, how each result will be verified, and what risks or assumptions could change the recommendation. If a previous plan was rejected, materially revise it and explicitly map every feedback item to a change.",
     parameters: {
       type: "object",
       properties: {
         title: {
           type: "string",
-          description: "Title of the proposed plan."
+          description: "Specific title naming the task and decision or outcome."
+        },
+        objective: {
+          type: "string",
+          description: "The precise question this plan will answer or outcome it will achieve."
         },
         steps: {
           type: "array",
+          minItems: 3,
           items: { type: "string" },
-          description: "Ordered list of step descriptions."
+          description: "Ordered, concrete steps. Each step must name the source/page/target, the information or action involved, and the expected result; include all relevant alternatives, not only the currently selected items."
+        },
+        researchTasks: {
+          type: "array",
+          items: { type: "string" },
+          description: "Specific research or inspection tasks, including how the relevant evidence will be obtained."
+        },
+        deliverables: {
+          type: "array",
+          items: { type: "string" },
+          description: "Concrete outputs the user will receive, such as comparison tables, calculations, and a recommendation with rationale."
+        },
+        successCriteria: {
+          type: "array",
+          items: { type: "string" },
+          description: "Conditions that must be satisfied for the plan to be complete."
+        },
+        verification: {
+          type: "array",
+          minItems: 1,
+          items: { type: "string" },
+          description: "How facts, calculations, source coverage, and the final recommendation will be checked before completion."
+        },
+        risks: {
+          type: "array",
+          items: { type: "string" },
+          description: "Material risks, limitations, missing data, or situations where the agent must stop and ask the user."
+        },
+        assumptions: {
+          type: "array",
+          items: { type: "string" },
+          description: "Assumptions that need confirmation, such as retirement timeline, risk tolerance, fees, or account constraints."
+        },
+        feedbackAddressed: {
+          type: "array",
+          items: { type: "string" },
+          description: "For a revision, one entry for every item of user feedback and exactly how this plan addresses it. Use an empty array for the first submission."
+        },
+        changesFromPrevious: {
+          type: "array",
+          items: { type: "string" },
+          description: "For a revision, list the material changes from the rejected plan. Use an empty array for the first submission."
         },
         notes: {
           type: "string",
-          description: "Optional background context, potential risks, or assumptions."
+          description: "Additional context only; notes do not substitute for detailed steps, verification, or feedback mapping."
         }
       },
-      required: ["title", "steps"],
+      required: ["title", "objective", "steps", "verification"],
       additionalProperties: false
     }
   },

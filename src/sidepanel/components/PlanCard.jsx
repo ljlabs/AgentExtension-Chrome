@@ -1,13 +1,44 @@
 import { useState } from "react";
 import { resolveInteraction } from "../agent/controller.js";
 
-function summaryText(approved, feedback, autoApprove) {
+function summaryText(approved, feedback, autoApprove, cancelled) {
+  if (cancelled) return "Plan Cancelled — switch back to this tab to start a new run.";
+
   if (approved) {
     let text = feedback ? `Plan Approved with feedback: "${feedback}"` : "Plan Approved";
     if (autoApprove) text += " (auto-approving actions)";
     return text;
   }
   return feedback ? `Plan Rejected with feedback: "${feedback}"` : "Plan Rejected";
+}
+
+function DetailList({ label, values }) {
+  if (!Array.isArray(values) || values.length === 0) return null;
+
+  return (
+    <div className="plan-detail-section">
+      <strong>{label}</strong>
+      <ul>
+        {values.map((value, index) => <li key={index}>{value}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function PlanDetails({ args }) {
+  return (
+    <div className="plan-details">
+      {args.objective && <p className="plan-objective"><strong>Objective:</strong> {args.objective}</p>}
+      <DetailList label="Research and inspection" values={args.researchTasks} />
+      <DetailList label="Deliverables" values={args.deliverables} />
+      <DetailList label="Success criteria" values={args.successCriteria} />
+      <DetailList label="Verification" values={args.verification} />
+      <DetailList label="Risks" values={args.risks} />
+      <DetailList label="Assumptions" values={args.assumptions} />
+      <DetailList label="Feedback addressed" values={args.feedbackAddressed} />
+      <DetailList label="Changes from previous plan" values={args.changesFromPrevious} />
+    </div>
+  );
 }
 
 export default function PlanCard({ item }) {
@@ -20,14 +51,16 @@ export default function PlanCard({ item }) {
     return (
       <div className="plan-card restored-ui-card">
         <h4>{args.title || "Plan Overview"}</h4>
+        <PlanDetails args={args} />
         <ol className="plan-steps-list">
           {steps.map((step, index) => <li key={index}>{step}</li>)}
         </ol>
+        {args.notes && <div className="plan-notes">{args.notes}</div>}
         <div
           className="interactive-response-summary"
           style={{ background: response.approved ? "var(--green)" : "var(--danger)" }}
         >
-          {summaryText(response.approved, response.feedback, response.autoApprove)}
+          {summaryText(response.approved, response.feedback, response.autoApprove, response.cancelled)}
         </div>
       </div>
     );
@@ -42,6 +75,7 @@ export default function PlanCard({ item }) {
   return (
     <div className="plan-card">
       <h4>{args.title || "Plan Overview"}</h4>
+      <PlanDetails args={args} />
       <ol className="plan-steps-list">
         {steps.map((step, index) => <li key={index}>{step}</li>)}
       </ol>

@@ -21,10 +21,55 @@ import { devLog, devGroup, devGroupEnd, devWarn, truncate } from "./util.js";
 
 let tabSwitchQueue = Promise.resolve();
 let nextItemId = 1;
+let stopReason = null;
 const interactionResolvers = new Map();
 
 function newItemId() {
   return `item_${nextItemId++}`;
+}
+
+function normalizePlanPart(value) {
+  if (Array.isArray(value)) {
+    return value.map((part) => normalizePlanPart(part)).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value.trim().replace(/\s+/g, " ");
+  }
+
+  return value ?? "";
+}
+
+function planRevisionSnapshot(plan) {
+  const source = plan?.args || plan || {};
+  return {
+    objective: normalizePlanPart(source.objective),
+    steps: normalizePlanPart(source.steps),
+    researchTasks: normalizePlanPart(source.researchTasks),
+    successCriteria: normalizePlanPart(source.successCriteria),
+    verification: normalizePlanPart(source.verification),
+    deliverables: normalizePlanPart(source.deliverables)
+  };
+}
+
+function hasMaterialPlanRevision(previousPlan, nextPlan) {
+  return JSON.stringify(planRevisionSnapshot(previousPlan)) !==
+    JSON.stringify(planRevisionSnapshot(nextPlan));
+}
+
+function planRevisionInstruction(feedback, previousPlan) {
+  const feedbackText = feedback || "No written feedback was provided; improve the plan based on the original request.";
+  const previousSteps = Array.isArray(previousPlan?.steps) ? previousPlan.steps : [];
+
+  return [
+    "The user rejected your proposed plan.",
+    `Feedback from the user: ${feedbackText}`,
+    "Do not resubmit the same plan with a note or footnote. Translate every feedback item into concrete changes to the objective, research tasks, steps, deliverables, success criteria, or verification.",
+    previousSteps.length
+      ? `The rejected plan's steps were: ${JSON.stringify(previousSteps)}`
+      : "There was no usable step list in the rejected plan.",
+    "Before calling submit_plan again, make the revised scope visibly different and use feedbackAddressed and changesFromPrevious to explain the changes."
+  ].join("\n");
 }
 
 // --- Chat display items (React renders these; state.messages stays the
@@ -339,7 +384,7 @@ function requestTabSwitch(newTabId, options = {}) {
     // If the agent is mid-run, stop it and wait for it to unwind so its
     // messages are saved to the outgoing tab before we swap.
     if (state.isRunning) {
-      onStop();
+      onStop({ reason: "tab-switch" });
       try {
         await state.runPromise;
       } catch {
@@ -528,7 +573,8 @@ export async function onSend(text) {
   await state.runPromise;
 }
 
-export function onStop() {
+export function onStop(options = {}) {
+  stopReason = options.reason === "tab-switch" ? "tab-switch" : "user";
   state.stopped = true;
 
   if (state.abortController) {
@@ -542,19 +588,23 @@ export function onStop() {
   // Cancel any pending interactive cards (question/approval/plan). Without
   // this, runAgent awaits the card promise forever and the tab-switch queue
   // deadlocks behind state.runPromise.
-  cancelPendingInteractions();
+  cancelPendingInteractions(stopReason);
 
   setStatus("Stopping...");
 }
 
-function cancelPendingInteractions() {
+function cancelPendingInteractions(reason = "user") {
+  const answer = reason === "tab-switch"
+    ? "Cancelled because the agent switched tabs."
+    : "Cancelled by user (agent stopped).";
+
   for (const [interactionId, resolve] of interactionResolvers) {
     const item = state.chatItems.find((entry) => entry.id === interactionId);
     if (item) {
       item.pending = false;
-      item.response = { cancelled: true, approved: false, answer: "Cancelled by user (agent stopped)." };
+      item.response = { cancelled: true, approved: false, answer };
     }
-    resolve({ cancelled: true, approved: false, answer: "Cancelled by user (agent stopped)." });
+    resolve({ cancelled: true, approved: false, answer });
   }
   interactionResolvers.clear();
   emit();
@@ -584,6 +634,7 @@ async function runAgent() {
 
   const settings = state.settings;
 
+  stopReason = null;
   setRunning(true);
   state.stopped = false;
   state.visionFailed = false;
@@ -704,6 +755,23 @@ async function runAgent() {
           stepMessages.push(toolMessage);
 
           addToolResult(validation, result);
+
+          // Tool results are the durable source of truth, but a rejected plan
+          // also gets a direct, ephemeral instruction. This is especially
+          // important for smaller/local models that otherwise repeat the same
+          // tool call after seeing only a JSON rejection payload.
+          if (validation.name === "submit_plan" && (
+            result?.data?.revisionRequired === true ||
+            result?.error?.code === "plan_revision_required"
+          )) {
+            apiMessages.push({
+              role: "user",
+              content: planRevisionInstruction(
+                result?.data?.feedback || result?.error?.feedback || "",
+                result?.data?.previousPlan || result?.error?.previousPlan
+              )
+            });
+          }
         }
 
         const notIncluded = validations.filter((validation) => !validation.includeInAssistant);
@@ -727,6 +795,13 @@ async function runAgent() {
           state.messages.push(...stepMessages);
           devGroupEnd();
           continue;
+        }
+
+        // A tab switch intentionally cancels the in-flight run, but the
+        // assistant tool call and UI-bearing result must still be persisted
+        // so the interactive card can be rebuilt when the tab is revisited.
+        if (stopReason === "tab-switch") {
+          state.messages.push(...stepMessages);
         }
 
         devGroupEnd();
@@ -775,7 +850,7 @@ async function runAgent() {
       addSystem(`Stopped after ${settings.maxToolSteps} tool steps.`);
     }
 
-    if (state.stopped) {
+    if (state.stopped && stopReason !== "tab-switch") {
       addSystem("Agent stopped.");
     }
   } catch (err) {
@@ -786,6 +861,7 @@ async function runAgent() {
     setStatus("");
     state.runPromise = null;
     await saveTabState(completedTabId);
+    stopReason = null;
   }
 }
 
@@ -977,19 +1053,68 @@ export async function executeToolWithPermissions(name, args) {
     }
 
     if (name === "submit_plan") {
+      const previousPlan = state.currentPlan?.approved === false ? state.currentPlan : null;
+      const feedbackAddressed = Array.isArray(args.feedbackAddressed)
+        ? args.feedbackAddressed.filter((item) => typeof item === "string" && item.trim())
+        : [];
+      const changesFromPrevious = Array.isArray(args.changesFromPrevious)
+        ? args.changesFromPrevious.filter((item) => typeof item === "string" && item.trim())
+        : [];
+      const revisionIsMaterial = previousPlan && hasMaterialPlanRevision(previousPlan, args);
+      const revisionExplainsChanges = changesFromPrevious.length > 0;
+      const revisionMapsFeedback = !previousPlan?.feedback || feedbackAddressed.length > 0;
+
+      if (previousPlan && (!revisionIsMaterial || !revisionExplainsChanges || !revisionMapsFeedback)) {
+        const feedback = previousPlan.feedback || "";
+        return {
+          ok: false,
+          error: {
+            code: "plan_revision_required",
+            tool: name,
+            message: "The revised plan must materially change the rejected plan and explicitly address the user's feedback.",
+            feedback,
+            previousPlan: {
+              title: previousPlan.title,
+              steps: previousPlan.steps
+            },
+            instruction: planRevisionInstruction(feedback, previousPlan)
+          }
+        };
+      }
+
       const response = await pushInteractive("submit_plan", args);
+      const approved = response.approved === true;
+      const feedback = typeof response.feedback === "string" ? response.feedback.trim() : "";
+
       state.currentPlan = {
+        ...args,
         title: args.title || "Plan Overview",
         steps: Array.isArray(args.steps) ? args.steps : [],
-        approved: response.approved === true,
-        feedback: response.feedback || ""
+        approved,
+        feedback,
+        revisionRequired: !approved
       };
       // Auto-approval is enabled only for an explicitly approved plan that
       // requested it. A later plan without the option turns it off.
-      state.autoApproveActions = response.approved === true && response.autoApprove === true;
+      state.autoApproveActions = approved && response.autoApprove === true;
       state.currentApproval = null;
       emit();
-      return { ok: true, data: response, ui: { type: name, args, response } };
+
+      const data = {
+        ...response,
+        feedback,
+        planRejected: !approved,
+        revisionRequired: !approved,
+        ...(approved ? {} : {
+          previousPlan: {
+            title: args.title || "Plan Overview",
+            steps: Array.isArray(args.steps) ? args.steps : []
+          },
+          instruction: planRevisionInstruction(feedback, args)
+        })
+      };
+
+      return { ok: true, data, ui: { type: name, args, response } };
     }
 
     if (name === "assess_page_risk") {

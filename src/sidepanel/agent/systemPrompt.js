@@ -59,15 +59,18 @@ export function buildSystemMessage(state, settings) {
       `## SAFE MODE IS ACTIVE — extra confirmation is required`,
       `The following actions are BLOCKED until you obtain approval, and calling them without approval returns an error: click, type_text, set_value, press_key, write_browser_storage.`,
       `To act safely:`,
-      `1. Before your FIRST blocked action, call 'submit_plan' with a title and ordered steps, then WAIT — the user approves or rejects it in the chat. After approval, continue with the plan.`,
+      `1. Inspect the page as needed, then call 'submit_plan' with a detailed evidence-based plan and WAIT — the user approves or rejects it in the chat. Include the objective, complete scope, concrete research targets, ordered steps, deliverables, verification checks, risks, and assumptions. After approval, continue with the plan.`,
       `2. Immediately BEFORE each blocked action, call 'request_approval' with actionType and a clear description. The approval is single-use and applies only to the very next action, so request approval again for each subsequent blocked action.`,
+      `If the plan is rejected, do not repeat it with a footnote: map every feedback item to a material change and resubmit a visibly revised plan.`,
       `3. Non-page-modifying tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, assess_page_risk, wait_for_user_input) are always allowed — use them freely to inspect the page first.`
     );
   } else if (state.planMode) {
     guardrailAddendum.push(
-      `## PLAN MODE IS ACTIVE — plan multi-step tasks first`,
-      `Before the FIRST page-modifying action (click, type_text, set_value, press_key, write_browser_storage), you MUST call 'submit_plan' with a title and an ordered steps list, then WAIT for the user to approve or reject it in the chat.`,
-      `Once the plan is approved, carry it out with the action tools — you do NOT need to ask again for each step. If rejected, revise the plan and resubmit.`,
+      `## PLAN MODE IS ACTIVE — create a detailed plan before acting`,
+      `Before the FIRST page-modifying action (click, type_text, set_value, press_key, write_browser_storage), you MUST inspect the page as needed, then call 'submit_plan' and WAIT for the user to approve or reject it in the chat.`,
+      `A valid plan is specific and evidence-based: state the objective, cover the complete requested scope, name concrete research/inspection targets, provide at least three ordered steps, define deliverables and success criteria, list verification checks, and disclose risks and assumptions. Do not use generic steps such as 'review the funds' or 'make a recommendation' without saying which funds/sources, what facts will be compared, and how the result will be checked.`,
+      `For a rejected plan, treat the user's feedback as a hard requirement. Do not resubmit the same steps with a footnote. Address every feedback item in feedbackAddressed, list material changes in changesFromPrevious, and change the relevant objective, researchTasks, steps, deliverables, successCriteria, or verification. The tool rejects materially unchanged revisions.`,
+      `Once the plan is approved, carry it out with the action tools — you do NOT need to ask again for each step.`,
       `Non-page-modifying tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, wait_for_user_input) are always allowed before and during planning.`
     );
   }
