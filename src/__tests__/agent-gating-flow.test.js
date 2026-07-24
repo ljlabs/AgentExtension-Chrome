@@ -65,7 +65,7 @@ describe("Plan Mode gating", () => {
   });
 
   it("never gates read-only tools", async () => {
-    for (const tool of ["get_text", "get_interactive_snapshot", "scroll_to"]) {
+    for (const tool of ["get_text", "get_interactive_snapshot", "get_changes_since_last_interactive_snapshot", "scroll_to"]) {
       const result = await executeToolWithPermissions(tool, {});
       expect(result.ok, `${tool} should not be gated`).toBe(true);
     }
@@ -149,6 +149,33 @@ describe("ask_user_question flow", () => {
     expect(result.ok).toBe(true);
     expect(result.data.answer).toBe("a");
     expect(result.ui.response.answer).toBe("a");
+  });
+});
+
+describe("wait_for_user_input flow", () => {
+  it("waits for Continue and refreshes page context afterward", async () => {
+    const promise = executeToolWithPermissions("wait_for_user_input", {
+      message: "Enter the password or upload the file in the browser, then continue."
+    });
+
+    const card = lastInteractiveItem();
+    expect(card.uiType).toBe("wait_for_user_input");
+    expect(card.pending).toBe(true);
+
+    resolveInteraction(card.id, { continued: true });
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    expect(result.data.continued).toBe(true);
+    expect(result.data.changes.echoed).toBe("get_changes_since_last_interactive_snapshot");
+    expect(result.ui.response.changes).toEqual(result.data.changes);
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: "get_changes_since_last_interactive_snapshot",
+        tabId: 1
+      }),
+      expect.any(Function)
+    );
   });
 });
 

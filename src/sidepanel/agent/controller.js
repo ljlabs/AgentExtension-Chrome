@@ -921,6 +921,25 @@ export async function executeToolWithPermissions(name, args) {
       return { ok: true, data: response, ui: { type: name, args, response } };
     }
 
+    if (name === "wait_for_user_input") {
+      const response = await pushInteractive("wait_for_user_input", args);
+      if (response.cancelled) {
+        return { ok: true, data: response, ui: { type: name, args, response } };
+      }
+
+      const changes = await executePrivilegedTool("get_changes_since_last_interactive_snapshot", {});
+      const pageChanges = changes.ok
+        ? changes.data
+        : { type: "error", error: changes.error || "Unable to refresh page context." };
+      const continuedResponse = { ...response, changes: pageChanges };
+
+      return {
+        ok: true,
+        data: continuedResponse,
+        ui: { type: name, args, response: continuedResponse }
+      };
+    }
+
     if (name === "request_approval") {
       // If auto-approve is active, automatically approve
       if (state.autoApproveActions) {

@@ -14,8 +14,9 @@ export const DEFAULT_SYSTEM_PROMPT = `${BROWSER_ROUTING_PROMPT}You are a browser
 2. Then call click, type_text, set_value, press_key, or scroll_to using the "ref" value from the snapshot. Refs are the most reliable target.
 3. Click and scroll_to results include a 'changes' value containing a Git-style UI diff since the last snapshot or change check. Use get_changes_since_last_interactive_snapshot to retrieve that diff on demand.
 4. If a 'changes' value has type: 'full_snapshot', treat its elements as the new complete page context, because the URL changed or no baseline existed. Otherwise use its '-' removals and '+' additions, or its structured added, removed, and changed elements, to update the prior snapshot.
-5. To read a page, use get_page_info, get_text, or get_html.
-6. When the task is done, reply in plain text with no tool call.
+5. If the user must manually complete a browser step, such as entering a password, uploading a file, completing MFA, or handling a redirect, call wait_for_user_input with clear instructions. Never ask the user to send sensitive values in chat. When the user clicks Continue, the tool returns a fresh page diff or full snapshot; inspect it before continuing.
+6. To read a page, use get_page_info, get_text, or get_html.
+7. When the task is done, reply in plain text with no tool call.
 
 ## Rules
 - Bias toward ACTION. If the user asks you to do something on the page, do it with tools — do not just describe what you would do, and do not ask permission for ordinary actions.
@@ -60,14 +61,14 @@ export function buildSystemMessage(state, settings) {
       `To act safely:`,
       `1. Before your FIRST blocked action, call 'submit_plan' with a title and ordered steps, then WAIT — the user approves or rejects it in the chat. After approval, continue with the plan.`,
       `2. Immediately BEFORE each blocked action, call 'request_approval' with actionType and a clear description. The approval is single-use and applies only to the very next action, so request approval again for each subsequent blocked action.`,
-      `3. Read-only tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, assess_page_risk) are always allowed — use them freely to inspect the page first.`
+      `3. Non-page-modifying tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, assess_page_risk, wait_for_user_input) are always allowed — use them freely to inspect the page first.`
     );
   } else if (state.planMode) {
     guardrailAddendum.push(
       `## PLAN MODE IS ACTIVE — plan multi-step tasks first`,
       `Before the FIRST page-modifying action (click, type_text, set_value, press_key, write_browser_storage), you MUST call 'submit_plan' with a title and an ordered steps list, then WAIT for the user to approve or reject it in the chat.`,
       `Once the plan is approved, carry it out with the action tools — you do NOT need to ask again for each step. If rejected, revise the plan and resubmit.`,
-      `Read-only tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to) are always allowed before and during planning.`
+      `Non-page-modifying tools (get_interactive_snapshot, get_changes_since_last_interactive_snapshot, get_text, get_page_info, get_html, scroll_to, wait_for_user_input) are always allowed before and during planning.`
     );
   }
 

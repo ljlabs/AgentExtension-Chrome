@@ -2,12 +2,14 @@ import Markdown from "./Markdown.jsx";
 import QuestionCard from "./QuestionCard.jsx";
 import ApprovalCard from "./ApprovalCard.jsx";
 import PlanCard from "./PlanCard.jsx";
+import WaitForUserInputCard from "./WaitForUserInputCard.jsx";
 import ToolCallBubble from "./ToolCallBubble.jsx";
 
 const INTERACTIVE_TITLES = {
   ask_user_question: "Clarifying Question",
   request_approval: "Approval Required",
-  submit_plan: "Proposed Plan"
+  submit_plan: "Proposed Plan",
+  wait_for_user_input: "Waiting for Your Input"
 };
 
 function Message({ className, title, children }) {
@@ -70,6 +72,7 @@ export default function MessageItem({ item }) {
       if (item.uiType === "ask_user_question") card = <QuestionCard item={item} />;
       else if (item.uiType === "request_approval") card = <ApprovalCard item={item} />;
       else if (item.uiType === "submit_plan") card = <PlanCard item={item} />;
+      else if (item.uiType === "wait_for_user_input") card = <WaitForUserInputCard item={item} />;
 
       return (
         <Message className="assistant" title={title}>

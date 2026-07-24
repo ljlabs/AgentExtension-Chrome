@@ -492,6 +492,25 @@ export const AGENT_TOOLS = [
     }
   },
   {
+    name: "wait_for_user_input",
+    description: "Pause until the user finishes a manual browser step, such as entering a password or uploading a file, and clicks Continue. The result includes a fresh Git-style page diff or a full snapshot if the page changed.",
+    parameters: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "Tell the user what manual step to complete in the browser before continuing. Do not ask them to send sensitive values in chat."
+        },
+        continueLabel: {
+          type: "string",
+          description: "Optional label for the Continue button."
+        }
+      },
+      required: ["message"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "request_approval",
     description: "Request user approval before executing high-risk actions (e.g., submitting forms, purchases, deployments, deletions).",
     parameters: {
