@@ -947,6 +947,24 @@ async function runAgent() {
         continue;
       }
 
+      if (state.planMode && state.currentPlan?.approved !== true) {
+        const planCheckpoint = {
+          role: "user",
+          content:
+            "Plan Mode is active and no plan has been approved yet. Do not provide a final answer. " +
+            "Use the evidence gathered so far to call submit_plan with one detailed, evidence-based plan, " +
+            "then wait for the user to approve or reject it."
+        };
+
+        addAssistantMessage(assistantMessage.content || "(empty response)", []);
+        addUserMessage(planCheckpoint.content);
+        apiMessages.push(assistantMessage, planCheckpoint);
+        state.messages.push(assistantMessage, planCheckpoint);
+        addSystem("Plan Mode requires an approved plan before the agent can provide a final answer.");
+        devGroupEnd();
+        continue;
+      }
+
       finalAnswer = parsed.content || "(empty response)";
       assistantMessage.content = finalAnswer;
 
